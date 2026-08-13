@@ -33,6 +33,8 @@ namespace Avalonia.OpenGL.Egl
 
         protected virtual bool SkipWaits => false;
 
+        public virtual PlatformSurfaceColorFormat ColorFormat => Context.Display.ColorFormat;
+
         public abstract IGlPlatformSurfaceRenderingSession BeginDrawCore(IRenderTarget.RenderTargetSceneInfo sceneInfo);
 
         protected IGlPlatformSurfaceRenderingSession BeginDraw(EglSurface surface,
@@ -70,7 +72,7 @@ namespace Avalonia.OpenGL.Egl
 
                 
                 success = true;
-                return new Session(Context.Display, Context, surface, size, scaling,  restoreContext, onFinish, isYFlipped, SkipWaits, beforeSwap);
+                return new Session(Context.Display, Context, surface, size, scaling,  restoreContext, onFinish, isYFlipped, SkipWaits, beforeSwap, ColorFormat);
             }
             finally
             {
@@ -92,11 +94,12 @@ namespace Avalonia.OpenGL.Egl
             public Session(EglDisplay display, EglContext context,
                 EglSurface glSurface, PixelSize size, double scaling,
                 IDisposable restoreContext, Action? onFinish, bool isYFlipped, bool skipWaits,
-                Action? beforeSwap = null)
+                Action? beforeSwap = null, PlatformSurfaceColorFormat colorFormat = default)
             {
                 Size = size;
                 Scaling = scaling;
                 IsYFlipped = isYFlipped;
+                ColorFormat = colorFormat;
                 _context = context;
                 _display = display;
                 _glSurface = glSurface;
@@ -128,6 +131,7 @@ namespace Avalonia.OpenGL.Egl
             public PixelSize Size { get; }
             public double Scaling { get; }
             public bool IsYFlipped { get; }
+            public PlatformSurfaceColorFormat ColorFormat { get; }
         }
 
         public virtual PlatformRenderTargetState State =>

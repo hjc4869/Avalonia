@@ -9,5 +9,10 @@ namespace Avalonia.OpenGL.Surfaces
     public interface IGlPlatformSurfaceRenderTarget : IDisposable, IPlatformRenderSurfaceRenderTarget
     {
         IGlPlatformSurfaceRenderingSession BeginDraw(IRenderTarget.RenderTargetSceneInfo sceneInfo);
+
+        /// <summary>
+        /// The pixel encoding and color space every session created from this target will use.
+        /// </summary>
+        PlatformSurfaceColorFormat ColorFormat => default;
     }
 }

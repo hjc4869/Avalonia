@@ -20,32 +20,39 @@ namespace Avalonia.Wayland.Server.Transient.Rendering;
 internal sealed class WaylandEglWsiSurface : EglGlPlatformSurfaceBase, IPlatformRenderSurface
 {
     private readonly WSurface _surface;
+    private readonly WaylandEglWsiPlatformGraphics _graphics;
 
-    public WaylandEglWsiSurface(WSurface surface)
+    public WaylandEglWsiSurface(WSurface surface, WaylandEglWsiPlatformGraphics graphics)
     {
         _surface = surface;
+        _graphics = graphics;
     }
 
     public bool IsReady => _surface.State.IsReady;
 
     public override IGlPlatformSurfaceRenderTarget CreateGlRenderTarget(IGlContext context)
-        => new RenderTarget(_surface, (EglContext)context);
+        => new RenderTarget(_surface, (EglContext)context, _graphics);
 
     private sealed class RenderTarget : EglPlatformSurfaceRenderTargetBase
     {
         private readonly WSurface _surface;
+        private readonly WaylandEglWsiPlatformGraphics _graphics;
         private IntPtr _eglWindow;
         private EglSurface? _eglSurface;
         private PixelSize _currentSize;
         private bool _disposed;
 
-        public RenderTarget(WSurface surface, EglContext context) : base(context)
+        public RenderTarget(WSurface surface, EglContext context, WaylandEglWsiPlatformGraphics graphics)
+            : base(context)
         {
             _surface = surface;
+            _graphics = graphics;
             _surface.RegisterRenderTarget(this);
         }
 
         protected override bool SkipWaits => true;
+
+        public override PlatformSurfaceColorFormat ColorFormat => _graphics.ColorFormat;
 
         public override PlatformRenderTargetState State
         {

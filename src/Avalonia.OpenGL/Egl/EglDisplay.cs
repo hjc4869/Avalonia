@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using Avalonia.Platform;
 using Avalonia.Reactive;
 using static Avalonia.OpenGL.Egl.EglConsts;
 
@@ -20,6 +21,12 @@ namespace Avalonia.OpenGL.Egl
 
         public IntPtr Handle => _display;
         public IntPtr Config => _config.Config;
+
+        /// <summary>
+        /// The pixel encoding and color space negotiated for this display's EGL config.
+        /// </summary>
+        public PlatformSurfaceColorFormat ColorFormat => _config.ColorBufferFormat.SurfaceColorFormat;
+
         internal bool SingleContext => !_options.SupportsMultipleContexts;
         private readonly List<EglContext> _contexts = new();
         
@@ -45,7 +52,8 @@ namespace Avalonia.OpenGL.Egl
             if(_display == IntPtr.Zero)
                 throw new ArgumentException();
 
-            _config = EglDisplayUtils.InitializeAndGetConfig(_egl, display, options.GlVersions, options.ProbeConfig);
+            _config = EglDisplayUtils.InitializeAndGetConfig(_egl, display, options.GlVersions, options.ProbeConfig,
+                options.ColorBufferFormats);
         }
         
         public EglInterface EglInterface => _egl;

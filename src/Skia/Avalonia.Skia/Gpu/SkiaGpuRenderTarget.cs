@@ -38,6 +38,7 @@ namespace Avalonia.Skia
                 Dpi = SkiaPlatform.DefaultDpi * session.ScaleFactor,
                 ScaleDrawingToDpi = false,
                 Gpu = _skiaGpu,
+                ColorFormat = session.ColorFormat,
                 CurrentSession =  session
             };
 
@@ -45,8 +46,6 @@ namespace Avalonia.Skia
         }
         
         public PlatformRenderTargetState PlatformRenderTargetState => _renderTarget.State;
-        public RenderTargetProperties Properties { get; }
-
-
+        public RenderTargetProperties Properties => new() { ColorFormat = _renderTarget.ColorFormat };
     }
 }

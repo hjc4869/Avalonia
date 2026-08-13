@@ -63,6 +63,12 @@ public struct RenderTargetProperties
     /// framebuffers without a stencil attachment that is required for clipping with Skia 
     /// </summary>
     public bool IsSuitableForDirectRendering { get; init; }
+
+    /// <summary>
+    /// The pixel encoding and color space the render target was actually created with.
+    /// Defaults to the legacy non color managed 8 bit sRGB format.
+    /// </summary>
+    public PlatformSurfaceColorFormat ColorFormat { get; init; }
 }
 
 [PrivateApi]

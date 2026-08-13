@@ -21,6 +21,14 @@ public class EglDisplayOptions
     public Action? DisposeCallback { get; set; }
     public IEnumerable<GlVersion>? GlVersions { get; set; }
     public EglConfigProbeCallback? ProbeConfig { get; set; }
+
+    /// <summary>
+    /// Candidate color buffer layouts, in priority order. The first one the driver can satisfy is used,
+    /// so callers requesting a wide gamut or high bit depth config should always keep
+    /// <see cref="EglColorBufferFormat.Standard"/> last as a fallback.
+    /// When null, only the standard 8 bit non color managed config is considered.
+    /// </summary>
+    public IReadOnlyList<EglColorBufferFormat>? ColorBufferFormats { get; set; }
 }
 
 public class EglContextOptions

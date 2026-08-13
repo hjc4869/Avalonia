@@ -9,6 +9,7 @@ using Avalonia.Platform.Surfaces;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Transient;
 using Avalonia.Wayland.Server.Transient.Rendering;
+using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -25,6 +26,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     public WlSurface? WlSurface { get; private set; }
     protected WpFractionalScaleV1? FractionalScale { get; private set; }
     protected WpViewport? Viewport { get; private set; }
+    private WpColorManagementSurfaceV1? _colorSurface;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -127,6 +129,8 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
                 WlSurface, new FractionalScaleListener(this), connection.Queue);
             Viewport = globals.Viewporter!.GetViewport(WlSurface);
         }
+
+        _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
     }
 
     private IPlatformRenderSurface[]? _renderSurfaces;
@@ -313,6 +317,13 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             FractionalScale.Destroy();
             FractionalScale.Dispose();
             FractionalScale = null;
+        }
+        // color-management-v1 has the same ordering requirement.
+        if (_colorSurface != null)
+        {
+            _colorSurface.Destroy();
+            _colorSurface.Dispose();
+            _colorSurface = null;
         }
         WlSurface?.Destroy();
         WlSurface = null;

@@ -18,6 +18,55 @@ runs on a dedicated thread that also serves as our render thread. Yes, Wayland w
 
 NOTE: crash recovery is not yet supported when using an externally created wl_display.
 
+## Color management (wide color gamut / HDR)
+
+Off by default. `WaylandPlatformOptions.ColorMode` opts in:
+
+- `WideColorGamut` — 10 bit (fp16 fallback) surface, Display P3 primaries with a gamma 2.2 transfer
+  function. Existing controls keep their appearance because Skia color converts their sRGB colors
+  into the wider space; blending stays gamma-encoded so gradients and antialiasing are unaffected.
+- `ExtendedLinear` — fp16 scRGB surface (sRGB primaries, extended linear transfer). Channel values
+  below 0 and above 1 are meaningful, so it's the HDR-capable mode, but blending happens in linear
+  light and therefore differs from Avalonia's historical sRGB-encoded blending.
+
+Both sides have to agree before anything changes, and the negotiation happens once, in
+`WaylandGlobals`:
+
+1. Bind `wp_color_manager_v1` and read the compositor's supported features / transfer functions /
+   primaries (`WaylandColorManager.SelectColorSpace`).
+2. Only then create the EGL display, passing high bit depth `EglColorBufferFormat` candidates with
+   the plain 8 bit config last as a fallback.
+3. Create the image description for whatever EGL actually handed us, and tag every `wl_surface`
+   with it via `wp_color_management_surface_v1.set_image_description`.
+
+**Invariant: what we render and what we tag the surface with must always match.** An untagged
+surface is interpreted as sRGB, so rendering P3 pixels into one shifts every color on screen. If
+the compositor refuses the image description, `WaylandEglWsiPlatformGraphics.DowngradeToUnmanagedColorSpace`
+puts Skia back to plain sRGB; the buffer keeps whatever extra precision EGL gave us, which is
+always safe. Any failure along the way silently degrades to today's 8 bit sRGB behaviour.
+
+Known limitation: the software `WaylandFramebuffer` fallback always renders 8 bit sRGB, so if a
+tagged surface ever falls back to it, colors will be off until the surface is re-tagged.
+
+### NWayland pitfalls hit here
+
+- Passing an `IWlTargetQueue` **without** a listener throws. Interfaces with no events
+  (`wp_image_description_creator_params_v1`, `wp_color_management_surface_v1`) still need an empty
+  listener subclass.
+- Passing an explicit target queue to a **destructor request** (`wp_image_description_creator_params_v1.create`)
+  makes NWayland route the call through a proxy wrapper and then destroy the wrapper, which aborts
+  inside libwayland with `Tried to destroy wrapper with wl_proxy_destroy()`. Pass a `null` queue for
+  those and let the new object inherit its parent's queue.
+- `create` is a destructor: the creator must not be disposed or destroyed afterwards.
+
+### Choosing an extended linear description
+
+`create_windows_scrgb` pins signal 1.0 to 80 cd/m², not to the reference white, which makes ordinary
+SDR content visibly dimmer (measured: white composited at 167/255 instead of 255/255). The
+parametric description with the default sRGB luminances puts the reference white at 1.0, matching
+`EGL_EXT_gl_colorspace_scrgb_linear`, so it is preferred and `create_windows_scrgb` is only a
+fallback.
+
 ## Protocol docs
 
 Do NOT assume things about Wayland protocols. Those could be rather non-intuitive. Always check what the protocol says

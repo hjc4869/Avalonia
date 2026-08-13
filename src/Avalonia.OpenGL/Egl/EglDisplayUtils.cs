@@ -50,7 +50,8 @@ internal static class EglDisplayUtils
     }
 
     public static EglConfigInfo InitializeAndGetConfig(EglInterface egl, IntPtr display,
-        IEnumerable<GlVersion>? versions, EglConfigProbeCallback? probeConfig = null)
+        IEnumerable<GlVersion>? versions, EglConfigProbeCallback? probeConfig = null,
+        IReadOnlyList<EglColorBufferFormat>? colorBufferFormats = null)
     {
         if (!egl.Initialize(display, out _, out _))
             throw OpenGlException.GetFormattedException("eglInitialize", egl);
@@ -123,33 +124,49 @@ internal static class EglDisplayUtils
                 }
             });
 
+        var formats = colorBufferFormats is { Count: > 0 } ? colorBufferFormats : EglColorBufferFormat.StandardOnly;
+        var supportsFloatFormats =
+            egl.QueryString(display, EGL_EXTENSIONS)?.Contains("EGL_EXT_pixel_format_float") == true;
+
         foreach (var cfg in cfgs)
         {
             if (!egl.BindApi(cfg.Api))
                 continue;
-            foreach (var surfaceType in new[] { EGL_PBUFFER_BIT | EGL_WINDOW_BIT, EGL_WINDOW_BIT })
-            foreach (var stencilSize in new[] { 8, 1, 0 })
-            foreach (var depthSize in new[] { 8, 1, 0 })
+            foreach (var format in formats)
             {
-                var attribs = new[]
-                {
-                    EGL_SURFACE_TYPE, surfaceType,
-                    EGL_RENDERABLE_TYPE, cfg.RenderableTypeBit,
-                    EGL_RED_SIZE, 8,
-                    EGL_GREEN_SIZE, 8,
-                    EGL_BLUE_SIZE, 8,
-                    EGL_ALPHA_SIZE, 8,
-                    EGL_STENCIL_SIZE, stencilSize,
-                    EGL_DEPTH_SIZE, depthSize,
-                    EGL_NONE
-                };
-                if (ChooseConfigWithProbe(egl, display, attribs, probeConfig) is not { } config)
+                if (format.FloatComponents && !supportsFloatFormats)
                     continue;
+                foreach (var surfaceType in new[] { EGL_PBUFFER_BIT | EGL_WINDOW_BIT, EGL_WINDOW_BIT })
+                foreach (var stencilSize in new[] { 8, 1, 0 })
+                foreach (var depthSize in new[] { 8, 1, 0 })
+                {
+                    var attribs = new List<int>
+                    {
+                        EGL_SURFACE_TYPE, surfaceType,
+                        EGL_RENDERABLE_TYPE, cfg.RenderableTypeBit,
+                        EGL_RED_SIZE, format.ColorBits,
+                        EGL_GREEN_SIZE, format.ColorBits,
+                        EGL_BLUE_SIZE, format.ColorBits,
+                        EGL_ALPHA_SIZE, format.AlphaBits,
+                        EGL_STENCIL_SIZE, stencilSize,
+                        EGL_DEPTH_SIZE, depthSize
+                    };
+                    if (format.FloatComponents)
+                    {
+                        attribs.Add(EGL_COLOR_COMPONENT_TYPE_EXT);
+                        attribs.Add(EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT);
+                    }
 
-                egl.GetConfigAttrib(display, config, EGL_SAMPLES, out var sampleCount);
-                egl.GetConfigAttrib(display, config, EGL_STENCIL_SIZE, out var returnedStencilSize);
-                return new EglConfigInfo(config, cfg.Version, surfaceType, cfg.Attributes, sampleCount,
-                    returnedStencilSize, cfg.Api);
+                    attribs.Add(EGL_NONE);
+
+                    if (ChooseConfigWithProbe(egl, display, attribs.ToArray(), probeConfig) is not { } config)
+                        continue;
+
+                    egl.GetConfigAttrib(display, config, EGL_SAMPLES, out var sampleCount);
+                    egl.GetConfigAttrib(display, config, EGL_STENCIL_SIZE, out var returnedStencilSize);
+                    return new EglConfigInfo(config, cfg.Version, surfaceType, cfg.Attributes, sampleCount,
+                        returnedStencilSize, cfg.Api, format);
+                }
             }
         }
 
@@ -168,9 +185,10 @@ internal class EglConfigInfo
     public int SampleCount { get; }
     public int StencilSize { get; }
     public int Api { get; }
+    public EglColorBufferFormat ColorBufferFormat { get; }
 
     public EglConfigInfo(IntPtr config, GlVersion version, int surfaceType, int[] attributes, int sampleCount,
-        int stencilSize, int api)
+        int stencilSize, int api, EglColorBufferFormat colorBufferFormat)
     {
         Config = config;
         Version = version;
@@ -179,5 +197,6 @@ internal class EglConfigInfo
         SampleCount = sampleCount;
         StencilSize = stencilSize;
         Api = api;
+        ColorBufferFormat = colorBufferFormat;
     }
 }

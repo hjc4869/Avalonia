@@ -36,6 +36,7 @@ namespace Avalonia.Skia
         private GRContext? _grContext;
         public GRContext? GrContext => _grContext;
         private readonly ISkiaGpu? _gpu;
+        private readonly PlatformSurfaceColorFormat _colorFormat;
         private readonly SKPaint _strokePaint = SKPaintCache.Shared.Get();
         private readonly SKPaint _fillPaint = SKPaintCache.Shared.Get();
         private readonly SKPaint _boxShadowPaint = SKPaintCache.Shared.Get();
@@ -83,6 +84,13 @@ namespace Avalonia.Skia
             /// Skia GPU provider context (optional)
             /// </summary>
             public ISkiaGpu? Gpu;
+
+            /// <summary>
+            /// Pixel encoding and color space of the target surface. Layers and intermediate surfaces
+            /// created by this context inherit it so that wide gamut content isn't clamped on the way
+            /// to the swapchain.
+            /// </summary>
+            public PlatformSurfaceColorFormat ColorFormat;
 
             public ISkiaGpuRenderSession? CurrentSession;
         }
@@ -134,6 +142,8 @@ namespace Avalonia.Skia
                 public GRContext? GrContext => _context.GrContext;
                 public SKSurface? SkSurface => CheckLease(_context.Surface);
                 public double CurrentOpacity => CheckLease(_context._currentOpacity);
+                public PlatformSurfaceColorFormat ColorFormat => _context._colorFormat;
+                public SKColorSpace? SkColorSpace => _context._colorFormat.ToSkColorSpace();
 
 
                 public void Dispose()
@@ -192,6 +202,7 @@ namespace Avalonia.Skia
             _disableSubpixelTextRendering = createInfo.DisableSubpixelTextRendering;
             _grContext = createInfo.GrContext;
             _gpu = createInfo.Gpu;
+            _colorFormat = createInfo.ColorFormat;
             if (_grContext != null)
                 Monitor.Enter(_grContext);
             Surface = createInfo.Surface;
@@ -1498,6 +1509,7 @@ namespace Avalonia.Skia
                 Height = pixelSize.Height,
                 Dpi = _intermediateSurfaceDpi,
                 Format = format,
+                ColorFormat = _colorFormat,
                 DisableTextLcdRendering = isLayer ? _disableSubpixelTextRendering : true,
                 GrContext = _grContext,
                 Gpu = _gpu,

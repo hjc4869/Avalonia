@@ -173,6 +173,11 @@ namespace Avalonia.OpenGL.Egl
         public const int  EGL_IMAGE_PRESERVED = 0x30D2;
         public const int  EGL_NO_IMAGE = 0;
 
+        // EGL_EXT_pixel_format_float
+        public const int  EGL_COLOR_COMPONENT_TYPE_EXT = 0x3339;
+        public const int  EGL_COLOR_COMPONENT_TYPE_FIXED_EXT = 0x333A;
+        public const int  EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT = 0x333B;
+
         // EGL_KHR_image_base
         public const int  EGL_IMAGE_PRESERVED_KHR = 0x30D2;
 

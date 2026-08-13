@@ -1,4 +1,5 @@
 using System;
+using Avalonia.Platform;
 using SkiaSharp;
 
 namespace Avalonia.Skia
@@ -24,5 +25,10 @@ namespace Avalonia.Skia
         double ScaleFactor { get; }
         
         GRSurfaceOrigin SurfaceOrigin { get; }
+
+        /// <summary>
+        /// The pixel encoding and color space <see cref="SkSurface"/> was created with.
+        /// </summary>
+        PlatformSurfaceColorFormat ColorFormat => default;
     }
 }
