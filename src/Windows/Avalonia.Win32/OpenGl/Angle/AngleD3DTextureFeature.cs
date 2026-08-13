@@ -83,6 +83,8 @@ internal class AngleD3DTextureFeature  : IGlPlatformSurfaceRenderTargetFactory
             base.Dispose();
         }
 
+        public override PlatformSurfaceColorFormat ColorFormat => _target.ColorFormat;
+
         public override PlatformRenderTargetState State =>
             base.IsCorrupted ? PlatformRenderTargetState.Corrupted : _target.State;
     }

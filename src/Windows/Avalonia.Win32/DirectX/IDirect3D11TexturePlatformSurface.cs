@@ -29,6 +29,11 @@ public interface IDirect3D11TextureRenderTarget : IPlatformRenderSurfaceRenderTa
 public interface IDirect3D11TextureRenderTarget2 : IPlatformRenderSurfaceRenderTarget, IDisposable
 {
     IDirect3D11TextureRenderTargetRenderSession BeginDraw(IRenderTarget.RenderTargetSceneInfo sceneInfo);
+
+    /// <summary>
+    /// The pixel encoding and color space the textures handed out by this target are in.
+    /// </summary>
+    PlatformSurfaceColorFormat ColorFormat => default;
 }
 
 public interface IDirect3D11TextureRenderTargetRenderSession : IDisposable

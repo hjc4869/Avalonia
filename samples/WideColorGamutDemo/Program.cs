@@ -19,21 +19,38 @@ internal static class Program
 {
     public static void Main(string[] args)
     {
-        var mode = args.Length > 0 && Enum.TryParse<WaylandColorMode>(args[0], true, out var parsed)
-            ? parsed
-            : WaylandColorMode.Standard;
+        var extended = args.Length > 0 &&
+                       args[0].Equals("extendedlinear", StringComparison.OrdinalIgnoreCase);
 
-        Console.WriteLine($"[demo] requested color mode: {mode}");
+        Console.WriteLine($"[demo] requested color mode: {(extended ? "ExtendedLinear" : "Standard")}");
         Trace.Listeners.Add(new ConsoleTraceListener());
-        AvaloniaLocator.CurrentMutable.Bind<WaylandPlatformOptions>()
-            .ToConstant(new WaylandPlatformOptions { ColorMode = mode });
 
-        AppBuilder.Configure<App>()
-            .UseWayland()
+        var builder = AppBuilder.Configure<App>();
+
+        if (OperatingSystem.IsWindows())
+        {
+            AvaloniaLocator.CurrentMutable.Bind<Win32PlatformOptions>()
+                .ToConstant(new Win32PlatformOptions
+                {
+                    ColorMode = extended ? Win32ColorMode.ExtendedLinear : Win32ColorMode.Standard
+                });
+            builder = builder.UseWin32();
+        }
+        else
+        {
+            AvaloniaLocator.CurrentMutable.Bind<WaylandPlatformOptions>()
+                .ToConstant(new WaylandPlatformOptions
+                {
+                    ColorMode = extended ? WaylandColorMode.ExtendedLinear : WaylandColorMode.Standard
+                });
+            builder = builder.UseWayland();
+        }
+
+        builder
             .UseSkia()
             .UseHarfBuzz()
             .WithInterFont()
-            .LogToTrace(LogEventLevel.Information, "Wayland", "OpenGL")
+            .LogToTrace(LogEventLevel.Information, "Wayland", "OpenGL", "Win32")
             .StartWithClassicDesktopLifetime(Array.Empty<string>());
     }
 }
@@ -118,23 +135,37 @@ internal sealed class ColorProbe : Control
             var canvas = lease.SkCanvas;
             using var paint = new SKPaint { IsAntialias = false };
 
+            // Skia pins constant colors (SKPaint.SetColor and SKShader.CreateColor) into [0, 1], so
+            // out of gamut / above-white values have to be emitted through a gradient, which keeps
+            // its SKColorF stops unclamped.
+            static void FillPatch(SKCanvas canvas, SKPaint paint, SKRect rect, SKColorF color, SKColorSpace cs)
+            {
+                using var shader = SKShader.CreateLinearGradient(
+                    new SKPoint(rect.Left, rect.Top), new SKPoint(rect.Right, rect.Bottom),
+                    [color, color], cs, [0f, 1f], SKShaderTileMode.Clamp);
+                paint.Shader = shader;
+                canvas.DrawRect(rect, paint);
+                paint.Shader = null;
+            }
+
             // Row 0 is plain sRGB, the way every existing Avalonia control emits color. Rows 1 and 2
             // define the same primaries in Display P3 and Rec.2020: on a wide gamut surface they are
             // visibly more saturated, on a plain sRGB surface all three rows collapse to the same color.
             for (var row = 0; row < s_rowSpaces.Length; row++)
             for (var col = 0; col < s_primaries.Length; col++)
             {
-                paint.SetColor(s_primaries[col], s_rowSpaces[row]);
-                canvas.DrawRect(SKRect.Create(Gap + col * (Patch + Gap), Gap + row * (Patch + Gap), Patch, Patch),
-                    paint);
+                FillPatch(canvas, paint,
+                    SKRect.Create(Gap + col * (Patch + Gap), Gap + row * (Patch + Gap), Patch, Patch),
+                    s_primaries[col], s_rowSpaces[row]);
             }
 
             // Row 3: values above the SDR white level. Only representable on an extended range surface.
             for (var col = 0; col < 4; col++)
             {
                 var scale = 1f + col;
-                paint.SetColor(new SKColorF(scale, scale, scale), s_srgbLinear);
-                canvas.DrawRect(SKRect.Create(Gap + col * (Patch + Gap), Gap + 3 * (Patch + Gap), Patch, Patch), paint);
+                FillPatch(canvas, paint,
+                    SKRect.Create(Gap + col * (Patch + Gap), Gap + 3 * (Patch + Gap), Patch, Patch),
+                    new SKColorF(scale, scale, scale), s_srgbLinear);
             }
 
             if (DumpRequested && !s_dumped)
@@ -159,6 +190,8 @@ internal sealed class ColorProbe : Control
                 return;
             }
 
+            using (var snapshot = surface.Snapshot())
+                Console.WriteLine($"[probe] SkSurface color type  : {snapshot.ColorType}");
             Console.WriteLine("[probe] readback in the surface's own encoding (no conversion applied):");
             string[] labels = ["sRGB red     ", "DisplayP3 red", "Rec2020 red  ", "linear white "];
             var matrix = canvas.TotalMatrix;
@@ -169,6 +202,11 @@ internal sealed class ColorProbe : Control
                 Console.WriteLine($"[probe]   {labels[row]} @({centre.X,4:F0},{centre.Y,4:F0}) -> " +
                                   ReadPixel(surface, (int)centre.X, (int)centre.Y, lease.SkColorSpace));
             }
+
+            // 4x white: 4.0 on an extended range surface, 1.0 when the buffer clamps.
+            var hdr = matrix.MapPoint(Gap + 3 * (Patch + Gap) + Patch / 2f, Gap + 3 * (Patch + Gap) + Patch / 2f);
+            Console.WriteLine($"[probe]   4x white      @({hdr.X,4:F0},{hdr.Y,4:F0}) -> " +
+                              ReadPixel(surface, (int)hdr.X, (int)hdr.Y, lease.SkColorSpace));
 
             Console.WriteLine("[probe] -----------------------------------------------------");
         }
@@ -191,8 +229,9 @@ internal sealed class ColorProbe : Control
         private static string ReadPixel(SKSurface surface, int x, int y, SKColorSpace? colorSpace)
         {
             // Reading as float into the surface's own color space avoids any conversion, so the
-            // numbers below are exactly what the compositor receives.
-            var info = new SKImageInfo(1, 1, SKColorType.RgbaF32, SKAlphaType.Unpremul, colorSpace);
+            // numbers below are exactly what the compositor receives. Premul is used because
+            // unpremultiplying makes Skia clamp the result into [0, 1].
+            var info = new SKImageInfo(1, 1, SKColorType.RgbaF32, SKAlphaType.Premul, colorSpace);
             var buffer = Marshal.AllocHGlobal(info.BytesSize);
             try
             {

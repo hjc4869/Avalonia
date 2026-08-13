@@ -120,7 +120,7 @@ namespace Avalonia.Skia
             try
             {
                 var surface = new FboSkiaSurface(this, _grContext, _glContext, size, 
-                    session?.SurfaceOrigin ?? GRSurfaceOrigin.TopLeft);
+                    session?.SurfaceOrigin ?? GRSurfaceOrigin.TopLeft, session?.ColorFormat ?? default);
                 _canCreateSurfaces = true;
                 return surface;
             }
