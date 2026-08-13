@@ -61,6 +61,61 @@ public record BrowserPlatformOptions
     /// If used only when WasmEnableThreads is set to true. Default value is true.
     /// </summary>
     public bool? PreferManagedThreadDispatcher { get; set; } = true;
+
+    /// <summary>
+    /// Opts in to rendering into a wide gamut or extended range surface. Requires a WebGL rendering
+    /// mode and matching browser support; when that is missing the backend silently falls back to a
+    /// lesser format and ultimately to the standard sRGB surface, so enabling this is always safe.
+    /// </summary>
+    public BrowserColorMode ColorMode { get; set; } = BrowserColorMode.Standard;
+}
+
+/// <summary>
+/// The color space Avalonia renders its browser canvas in.
+/// </summary>
+public enum BrowserColorMode
+{
+    /// <summary>
+    /// Non color managed 8 bit sRGB. This is the default and matches Avalonia's behaviour on every
+    /// other backend.
+    /// </summary>
+    Standard,
+
+    /// <summary>
+    /// A Display P3 surface with the sRGB transfer function, i.e. the web platform's
+    /// <c>display-p3</c> color space. Existing controls keep their appearance because Skia color
+    /// converts their sRGB colors into the wider space, while custom drawing operations can emit
+    /// colors outside of the sRGB gamut.
+    /// </summary>
+    /// <remarks>
+    /// This color space is bounded, so colors are still clamped to the SDR white level. Use
+    /// <see cref="ExtendedSrgb"/> if you want values above SDR white.
+    /// </remarks>
+    WideColorGamut,
+
+    /// <summary>
+    /// An unbounded 16 bit float sRGB surface. Colors outside the sRGB gamut are expressed with
+    /// negative channel values and values above 1 exceed the SDR white level, so this covers both
+    /// wide gamut and HDR content.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This relies on floating point WebGL drawing buffers not being clamped, which is verified
+    /// behaviour in Chromium based browsers. Browsers that do clamp simply render the content as
+    /// SDR, so it degrades gracefully rather than breaking.
+    /// </para>
+    /// <para>
+    /// Unlike the extended linear modes on the desktop backends, the sRGB transfer function is kept,
+    /// so blending and gradient interpolation are unchanged from Avalonia's historical behaviour.
+    /// The web platform has no extended <em>linear</em> (scRGB) drawing buffer color space, and its
+    /// PQ/HLG ones are gated behind a non-default Chromium experiment, so this is the only route to
+    /// HDR on the web.
+    /// </para>
+    /// <para>
+    /// Falls back to <see cref="WideColorGamut"/> when a float drawing buffer is unavailable.
+    /// </para>
+    /// </remarks>
+    ExtendedSrgb
 }
 
 public static class BrowserAppBuilder

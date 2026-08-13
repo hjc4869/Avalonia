@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <TargetFramework>$(AvsCurrentBrowserTargetFramework)</TargetFramework>
+    <WasmEnableThreads>false</WasmEnableThreads>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The desktop demo project references Win32/Wayland, so the shared probe is linked in instead. -->
+    <Compile Include="../WideColorGamutDemo/ColorProbe.cs" Link="ColorProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Skia/Avalonia.Skia/Avalonia.Skia.csproj" />
+    <ProjectReference Include="../../src/Browser/Avalonia.Browser/Avalonia.Browser.csproj" />
+    <ProjectReference Include="../../src/Avalonia.Controls/Avalonia.Controls.csproj" />
+    <ProjectReference Include="../../src/Avalonia.Fonts.Inter/Avalonia.Fonts.Inter.csproj" />
+    <ProjectReference Include="../../src/Avalonia.Themes.Simple/Avalonia.Themes.Simple.csproj" />
+    <ProjectReference Include="../../src/HarfBuzz/Avalonia.HarfBuzz/Avalonia.HarfBuzz.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalUpToDateCheckInput Include="../../src/Browser/Avalonia.Browser/**/*" Visible="false" />
+  </ItemGroup>
+
+  <Import Project="../../src/Browser/Avalonia.Browser/build/Avalonia.Browser.props" />
+  <Import Project="../../src/Browser/Avalonia.Browser/build/Avalonia.Browser.targets" />
+</Project>

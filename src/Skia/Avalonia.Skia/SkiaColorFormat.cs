@@ -15,6 +15,9 @@ internal static class SkiaColorFormat
     private static readonly SKColorSpace s_displayP3 =
         SKColorSpace.CreateRgb(SKColorSpaceTransferFn.TwoDotTwo, SKColorSpaceXyz.DisplayP3);
 
+    private static readonly SKColorSpace s_displayP3Srgb =
+        SKColorSpace.CreateRgb(SKColorSpaceTransferFn.Srgb, SKColorSpaceXyz.DisplayP3);
+
     private static readonly SKColorSpace s_rec2020 =
         SKColorSpace.CreateRgb(SKColorSpaceTransferFn.TwoDotTwo, SKColorSpaceXyz.Rec2020);
 
@@ -28,7 +31,11 @@ internal static class SkiaColorFormat
     public static SKColorSpace? ToSkColorSpace(this PlatformColorSpace colorSpace) => colorSpace switch
     {
         PlatformColorSpace.Srgb => s_srgb,
+        // Extended sRGB is plain sRGB as far as Skia is concerned; the extended range comes from
+        // pairing it with a floating point color type, which Skia does not clamp.
+        PlatformColorSpace.ExtendedSrgb => s_srgb,
         PlatformColorSpace.DisplayP3 => s_displayP3,
+        PlatformColorSpace.DisplayP3Srgb => s_displayP3Srgb,
         PlatformColorSpace.Rec2020 => s_rec2020,
         PlatformColorSpace.ScRgbLinear => s_srgbLinear,
         PlatformColorSpace.Rec2020Pq => s_rec2020Pq,

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.JavaScript;
 using System.Threading;
 using Avalonia.Browser.Interop;
+using Avalonia.Logging;
 using Avalonia.OpenGL;
 using Avalonia.OpenGL.Surfaces;
 using Avalonia.Platform;
@@ -15,7 +16,14 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
 {
     private readonly Func<(PixelSize Size, double Scaling)> _sizeGetter;
     private readonly GLInfo _glInfo;
+    private readonly PlatformSurfaceColorFormat _colorFormat;
     public IGlContext GlContext { get; }
+
+    [JSImport("WebGlRenderTarget.setColorSpace", AvaloniaModule.MainModuleName)]
+    private static partial string SetJsColorSpace(JSObject target, string colorSpace);
+
+    [JSImport("WebGlRenderTarget.tryUseFloat16", AvaloniaModule.MainModuleName)]
+    private static partial bool TryUseJsFloat16(JSObject target);
 
     public BrowserWebGlRenderTarget(JSObject js, Func<(PixelSize, double)> sizeGetter) : base(js)
     {
@@ -30,18 +38,84 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
         var version = js.GetPropertyAsJSObject("attrs")!.GetPropertyAsInt32("majorVersion");
         GlContext = new WebGlContext(contextId, new GlVersion(GlProfileType.OpenGLES, version > 1 ? 3 : 2, 0),
             _glInfo.Samples, _glInfo.Stencils);
+        _colorFormat = NegotiateColorFormat(js);
     }
-    
+
+    private static PlatformSurfaceColorFormat NegotiateColorFormat(JSObject js)
+    {
+        var mode = AvaloniaLocator.Current.GetService<BrowserPlatformOptions>()?.ColorMode
+                   ?? BrowserColorMode.Standard;
+        if (mode == BrowserColorMode.Standard)
+            return PlatformSurfaceColorFormat.Unmanaged;
+
+        // Extended sRGB needs nothing but a float drawing buffer: the sRGB color space is left as is,
+        // because it is the lack of clamping in a float buffer that makes values outside [0, 1]
+        // meaningful. Out of gamut colors then ride on negative channel values.
+        if (mode == BrowserColorMode.ExtendedSrgb)
+        {
+            if (TryUseFloat16(js))
+                return new PlatformSurfaceColorFormat(PlatformPixelEncoding.RgbaF16,
+                    PlatformColorSpace.ExtendedSrgb);
+
+            Logger.TryGet(LogEventLevel.Information, LogArea.BrowserPlatform)
+                ?.Log(null, "No float drawing buffer available, falling back to a wide gamut surface");
+        }
+
+        string result;
+        try
+        {
+            result = SetJsColorSpace(js, "display-p3");
+        }
+        catch (Exception e)
+        {
+            Logger.TryGet(LogEventLevel.Warning, LogArea.BrowserPlatform)
+                ?.Log(null, "Unable to configure a wide gamut drawing buffer: {Error}", e.Message);
+            return PlatformSurfaceColorFormat.Unmanaged;
+        }
+
+        // The browser is free to ignore the request, in which case rendering must stay unmanaged so
+        // that Skia doesn't color convert into a space the drawing buffer isn't actually in.
+        if (result != "display-p3")
+        {
+            Logger.TryGet(LogEventLevel.Information, LogArea.BrowserPlatform)
+                ?.Log(null, "Wide gamut was requested but the drawing buffer stayed '{ColorSpace}'", result);
+            return PlatformSurfaceColorFormat.Unmanaged;
+        }
+
+        // A wide gamut spread over 8 bits per channel bands noticeably on a high bit depth display,
+        // so upgrade to 16 bit float when the browser allows it. This is purely a quality
+        // improvement: an 8 bit Display P3 buffer is still correct. Note that display-p3 is a bounded
+        // color space, so unlike ExtendedSrgb this still clamps at the SDR white level.
+        var encoding = TryUseFloat16(js) ? PlatformPixelEncoding.RgbaF16 : PlatformPixelEncoding.Default;
+        return new PlatformSurfaceColorFormat(encoding, PlatformColorSpace.DisplayP3Srgb);
+    }
+
+    private static bool TryUseFloat16(JSObject js)
+    {
+        try
+        {
+            return TryUseJsFloat16(js);
+        }
+        catch (Exception e)
+        {
+            Logger.TryGet(LogEventLevel.Verbose, LogArea.BrowserPlatform)
+                ?.Log(null, "Unable to use a 16 bit float drawing buffer: {Error}", e.Message);
+            return false;
+        }
+    }
+
     class GlSession : IGlPlatformSurfaceRenderingSession
     {
         private IDisposable? _restoreContext;
 
-        public GlSession(IGlContext context, PixelSize size, double scaling, IDisposable restoreContext)
+        public GlSession(IGlContext context, PixelSize size, double scaling, IDisposable restoreContext,
+            PlatformSurfaceColorFormat colorFormat)
         {
             _restoreContext = restoreContext;
             Context = context;
             Size = size;
             Scaling = scaling;
+            ColorFormat = colorFormat;
         }
 
         public void Dispose()
@@ -55,6 +129,7 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
         // This should technically be delivered via CompositionTarget.Scaling anyway, why do we still have this property
         public double Scaling { get; }
         public bool IsYFlipped => false;
+        public PlatformSurfaceColorFormat ColorFormat { get; }
     }
     
     class GlSurface : IGlPlatformSurfaceRenderTarget
@@ -68,6 +143,8 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
 
         public bool IsCorrupted => false;
 
+        public PlatformSurfaceColorFormat ColorFormat => _target._colorFormat;
+
         public void Dispose()
         {
             // No-op
@@ -79,7 +156,7 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
             _target.UpdateSize(s.Size);
             var restoreContext = _target.GlContext.EnsureCurrent();
             _target.GlContext.GlInterface.BindFramebuffer(GlConsts.GL_FRAMEBUFFER, (int)_target._glInfo.FboId);
-            return new GlSession(_target.GlContext, s.Size, s.Scaling, restoreContext);
+            return new GlSession(_target.GlContext, s.Size, s.Scaling, restoreContext, _target._colorFormat);
         }
     }
 

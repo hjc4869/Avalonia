@@ -39,7 +39,26 @@ public enum PlatformColorSpace : byte
     /// <summary>
     /// Rec. 2020 primaries with the SMPTE ST 2084 (PQ) transfer function.
     /// </summary>
-    Rec2020Pq
+    Rec2020Pq,
+
+    /// <summary>
+    /// Display P3 primaries with the sRGB transfer function. This is the encoding the web platform's
+    /// <c>display-p3</c> predefined color space uses, as defined by CSS Color 4.
+    /// </summary>
+    DisplayP3Srgb,
+
+    /// <summary>
+    /// Extended sRGB: sRGB primaries and the sRGB transfer function, but unbounded. Channel values
+    /// outside of <c>[0, 1]</c> are meaningful, so this requires a floating point
+    /// <see cref="PlatformPixelEncoding"/>. Colors outside the sRGB gamut are expressed with negative
+    /// channel values, and values above 1 exceed the SDR white level.
+    /// </summary>
+    /// <remarks>
+    /// This is the same idea as <see cref="ScRgbLinear"/>, but keeps the sRGB transfer function
+    /// instead of a linear one, so blending and gradient interpolation still happen in sRGB-encoded
+    /// space and match Avalonia's historical appearance.
+    /// </remarks>
+    ExtendedSrgb
 }
 
 /// <summary>
@@ -91,13 +110,19 @@ public readonly record struct PlatformSurfaceColorFormat(
     /// Whether channel values outside of <c>[0, 1]</c> are meaningful on this surface, i.e. whether
     /// colors outside of the sRGB gamut and above the SDR white level can be expressed.
     /// </summary>
-    public bool IsExtendedRange => ColorSpace == PlatformColorSpace.ScRgbLinear;
+    public bool IsExtendedRange => ColorSpace is PlatformColorSpace.ScRgbLinear
+        or PlatformColorSpace.ExtendedSrgb;
 
     /// <summary>
     /// Whether this format can display colors outside of the sRGB gamut.
     /// </summary>
-    public bool IsWideGamut => ColorSpace is PlatformColorSpace.DisplayP3 or PlatformColorSpace.Rec2020
-        or PlatformColorSpace.Rec2020Pq or PlatformColorSpace.ScRgbLinear;
+    /// <remarks>
+    /// Extended range formats qualify even though their primaries are sRGB, because negative channel
+    /// values reach outside the sRGB gamut.
+    /// </remarks>
+    public bool IsWideGamut => ColorSpace is PlatformColorSpace.DisplayP3 or PlatformColorSpace.DisplayP3Srgb
+        or PlatformColorSpace.Rec2020 or PlatformColorSpace.Rec2020Pq or PlatformColorSpace.ScRgbLinear
+        or PlatformColorSpace.ExtendedSrgb;
 
     public override string ToString() => $"{Encoding}/{ColorSpace}";
 }

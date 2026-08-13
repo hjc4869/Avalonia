@@ -23,6 +23,7 @@ export class WebGlRenderTarget extends WebRenderTarget {
     public stencil?: number;
     public sample?: number;
     public depth?: number;
+    public context: WebGLRenderingContext;
     private static _gl: EmscriptenGL | null = null;
 
     constructor(public canvas: HTMLCanvasElement | OffscreenCanvas, mode: BrowserRenderingMode) {
@@ -61,11 +62,58 @@ export class WebGlRenderTarget extends WebRenderTarget {
         super(canvas, "webgl");
 
         this.contextHandle = handle;
+        this.context = context;
         this.fboId = context.getParameter(context.FRAMEBUFFER_BINDING)?.id ?? 0;
         this.stencil = context.getParameter(context.STENCIL_BITS);
         this.sample = context.getParameter(context.SAMPLES);
         this.depth = context.getParameter(context.DEPTH_BITS);
         this.attrs = attrs;
+    }
+
+    /**
+     * Requests a drawing buffer color space and returns the one that is actually in effect.
+     * Setting an unsupported value throws, and some browsers silently keep the old value, so the
+     * result always has to be read back rather than assumed.
+     */
+    public static setColorSpace(target: WebGlRenderTarget, colorSpace: string): string {
+        const context = target.context as any;
+        if (typeof context.drawingBufferColorSpace !== "string") {
+            return "srgb";
+        }
+
+        try {
+            context.drawingBufferColorSpace = colorSpace;
+        } catch (e) {
+            // Unsupported enum value: the property keeps its previous value.
+        }
+
+        return context.drawingBufferColorSpace;
+    }
+
+    /**
+     * Tries to switch the drawing buffer to 16 bit float, which avoids banding when a wide gamut
+     * color space is spread over only 8 bits per channel. Returns whether it took effect.
+     *
+     * RGBA16F is only a legal drawingBufferStorage format once a float color buffer extension has
+     * been enabled on the context, otherwise it raises INVALID_ENUM. The chosen format persists
+     * across canvas resizes, so this only has to be done once.
+     */
+    public static tryUseFloat16(target: WebGlRenderTarget): boolean {
+        const context = target.context as any;
+        if (typeof context.drawingBufferStorage !== "function" || context.RGBA16F === undefined) {
+            return false;
+        }
+
+        if (!context.getExtension("EXT_color_buffer_half_float") && !context.getExtension("EXT_color_buffer_float")) {
+            return false;
+        }
+
+        context.drawingBufferStorage(context.RGBA16F, target.canvas.width, target.canvas.height);
+        if (context.getError() !== 0) {
+            return false;
+        }
+
+        return context.drawingBufferFormat === context.RGBA16F;
     }
 
     public static getCurrentContext(): number {

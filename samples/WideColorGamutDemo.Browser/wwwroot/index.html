@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AvaloniaUI - wide color gamut probe</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        html, body { margin: 0; overflow: hidden; background: black; }
+        #out { position: absolute; width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+<div id="out"></div>
+<script>
+    // Test harness: mirrors the probe output out of the browser so it can be read from a script.
+    (function () {
+        const url = new URLSearchParams(location.search).get("report");
+        if (!url) { return; }
+        const lines = ["[harness] installed"];
+        const send = () => navigator.sendBeacon(url, new Blob([lines.join("\n") + "\n[harness] end"], { type: "text/plain" }));
+        const hook = (name) => {
+            const original = console[name].bind(console);
+            console[name] = (...args) => {
+                original(...args);
+                const text = args.map(a => String(a)).join(" ");
+                lines.push(name === "log" ? text : `[${name}] ${text}`);
+                if (text.includes("---------------------")) { send(); }
+            };
+        };
+        ["log", "warn", "error"].forEach(hook);
+        window.addEventListener("error", e => { lines.push(`[onerror] ${e.message}`); });
+        setTimeout(send, 25000);
+    })();
+</script>
+<script type='module' src="./main.js"></script>
+</body>
+</html>
