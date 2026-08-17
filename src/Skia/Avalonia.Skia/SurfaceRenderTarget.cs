@@ -66,7 +66,7 @@ namespace Avalonia.Skia
             if (surface is null)
             {
                 if (CreateSurface(createInfo.GrContext, PixelSize.Width, PixelSize.Height, createInfo.Format,
-                        createInfo.ColorFormat)
+                    createInfo.ColorFormat, createInfo.PreferredColorVolume)
                     is { } skSurface)
                 {
                     surface = new SkiaSurfaceWrapper(skSurface);
@@ -90,11 +90,12 @@ namespace Avalonia.Skia
         /// <param name="height">Height.</param>
         /// <param name="format">Pixel format.</param>
         /// <param name="colorFormat">Surface color format.</param>
+        /// <param name="preferredColorVolume">Preferred color volume for the target surface.</param>
         /// <returns></returns>
         private static SKSurface? CreateSurface(GRContext? gpu, int width, int height, PixelFormat? format,
-            PlatformSurfaceColorFormat colorFormat)
+            PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume)
         {
-            var imageInfo = MakeImageInfo(width, height, format, colorFormat);
+            var imageInfo = MakeImageInfo(width, height, format, colorFormat, preferredColorVolume);
             if (gpu != null)
                 return SKSurface.Create(gpu, false, imageInfo, new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal));
             return SKSurface.Create(imageInfo, new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal));
@@ -187,14 +188,15 @@ namespace Avalonia.Skia
         /// <param name="height">Height.</param>
         /// <param name="format">Pixel format.</param>
         /// <param name="colorFormat">Surface color format.</param>
+        /// <param name="preferredColorVolume">Preferred color volume for the target surface.</param>
         /// <returns></returns>
         private static SKImageInfo MakeImageInfo(int width, int height, PixelFormat? format,
-            PlatformSurfaceColorFormat colorFormat)
+            PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume)
         {
             var colorType = colorFormat.ToSkColorType(PixelFormatHelper.ResolveColorType(format));
 
             return new SKImageInfo(Math.Max(width, 1), Math.Max(height, 1), colorType, SKAlphaType.Premul,
-                colorFormat.ToSkColorSpace());
+                colorFormat.ToSkColorSpace(preferredColorVolume));
         }
 
         /// <summary>

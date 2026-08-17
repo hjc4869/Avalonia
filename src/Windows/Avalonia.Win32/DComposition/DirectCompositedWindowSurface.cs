@@ -80,6 +80,10 @@ internal class DirectCompositedWindowRenderTarget : IDirect3D11TextureRenderTarg
 
     public PlatformSurfaceColorFormat ColorFormat { get; }
 
+    public PlatformSurfaceColorVolume? PreferredColorVolume =>
+        (_window.WindowInfo as EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume)
+        ?.PreferredColorVolume;
+
     [MemberNotNull(nameof(_surface))]
     private void CreateSurface(in IRenderTarget.RenderTargetSceneInfo sceneInfo)
     {

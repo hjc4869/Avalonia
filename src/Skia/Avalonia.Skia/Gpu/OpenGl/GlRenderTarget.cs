@@ -75,7 +75,7 @@ namespace Avalonia.Skia
                 var size = glSession.Size;
                 var colorFormat = glSession.ColorFormat;
                 var colorType = colorFormat.ToSkColorType(SKColorType.Rgba8888);
-                var colorSpace = colorFormat.ToSkColorSpace();
+                var colorSpace = colorFormat.ToSkColorSpace(glSession.PreferredColorVolume);
                 var scaling = glSession.Scaling;
                 if (size.Width <= 0 || size.Height <= 0 || scaling < 0)
                 {

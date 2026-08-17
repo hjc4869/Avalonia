@@ -28,8 +28,12 @@ namespace Avalonia.Skia
         public IDrawingContextImpl CreateDrawingContext(IRenderTarget.RenderTargetSceneInfo sceneInfo,
             out RenderTargetDrawingContextProperties properties)
         {
-            properties = default;
             var session = _renderTarget.BeginRenderingSession(sceneInfo);
+
+            properties = new RenderTargetDrawingContextProperties
+            {
+                PreferredColorVolume = session.PreferredColorVolume
+            };
 
             var nfo = new DrawingContextImpl.CreateInfo
             {

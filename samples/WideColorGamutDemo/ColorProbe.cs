@@ -55,7 +55,11 @@ internal sealed class ColorProbe : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        DispatcherTimer.RunOnce(() => ProbeDrawOp.DumpRequested = true, TimeSpan.FromSeconds(2));
+        DispatcherTimer.RunOnce(() =>
+        {
+            if (!ProbeDrawOp.HasDumped)
+                ProbeDrawOp.DumpRequested = true;
+        }, TimeSpan.FromSeconds(2));
         DispatcherTimer.Run(() => { InvalidateVisual(); return true; }, TimeSpan.FromMilliseconds(200));
 
         // The preferred color volume is a per-window, per-monitor value: it changes when the window
@@ -83,6 +87,7 @@ internal sealed class ColorProbe : Control
     private void OnPreferredColorVolumeChanged(object? sender, EventArgs e)
     {
         LogColorVolume("changed");
+        ProbeDrawOp.DumpRequested = true;
         InvalidateVisual();
     }
 
@@ -98,10 +103,11 @@ internal sealed class ColorProbe : Control
 
     public override void Render(DrawingContext context)
     {
+        var colorVolume = _colorVolumeFeature?.PreferredColorVolume;
         context.FillRectangle(Brushes.Black, new Rect(Bounds.Size));
-        context.Custom(new ProbeDrawOp(new Rect(Bounds.Size)));
+        context.Custom(new ProbeDrawOp(new Rect(Bounds.Size), colorVolume));
 
-        var text = new FormattedText(Describe(_colorVolumeFeature?.PreferredColorVolume),
+        var text = new FormattedText(Describe(colorVolume),
             CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, 14, Brushes.White);
         context.DrawText(text, new Point(Gap, Gap + 4 * (Patch + Gap)));
     }
@@ -109,7 +115,8 @@ internal sealed class ColorProbe : Control
     private sealed class ProbeDrawOp : ICustomDrawOperation
     {
         internal static bool DumpRequested;
-        private static bool s_dumped;
+        internal static bool HasDumped;
+        private readonly PlatformSurfaceColorVolume? _expectedColorVolume;
 
         private static readonly SKColorSpace s_srgb = SKColorSpace.CreateSrgb();
         private static readonly SKColorSpace s_srgbLinear = SKColorSpace.CreateSrgbLinear();
@@ -131,7 +138,11 @@ internal sealed class ColorProbe : Control
             new(0f, 1f, 1f), new(1f, 0f, 1f), new(1f, 1f, 0f)
         ];
 
-        public ProbeDrawOp(Rect bounds) => Bounds = bounds;
+        public ProbeDrawOp(Rect bounds, PlatformSurfaceColorVolume? expectedColorVolume)
+        {
+            Bounds = bounds;
+            _expectedColorVolume = expectedColorVolume;
+        }
 
         public Rect Bounds { get; }
         public bool HitTest(Point p) => false;
@@ -184,9 +195,15 @@ internal sealed class ColorProbe : Control
                     new SKColorF(scale, scale, scale), s_srgbLinear);
             }
 
-            if (DumpRequested && !s_dumped)
+            if (DumpRequested)
             {
-                s_dumped = true;
+                // A platform update can arrive while the render thread is finishing a session
+                // snapshotted with the old values. Wait for the matching session before dumping.
+                if (lease.PreferredColorVolume != _expectedColorVolume)
+                    return;
+
+                DumpRequested = false;
+                HasDumped = true;
                 Dump(lease, canvas);
             }
         }

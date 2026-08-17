@@ -150,7 +150,8 @@ namespace Avalonia.Skia
                 public SKSurface? SkSurface => CheckLease(_context.Surface);
                 public double CurrentOpacity => CheckLease(_context._currentOpacity);
                 public PlatformSurfaceColorFormat ColorFormat => _context._colorFormat;
-                public SKColorSpace? SkColorSpace => _context._colorFormat.ToSkColorSpace();
+                public SKColorSpace? SkColorSpace =>
+                    _context._colorFormat.ToSkColorSpace(_context._preferredColorVolume);
                 public PlatformSurfaceColorVolume? PreferredColorVolume => _context._preferredColorVolume;
 
 

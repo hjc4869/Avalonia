@@ -34,6 +34,12 @@ public interface IDirect3D11TextureRenderTarget2 : IPlatformRenderSurfaceRenderT
     /// The pixel encoding and color space the textures handed out by this target are in.
     /// </summary>
     PlatformSurfaceColorFormat ColorFormat => default;
+
+    /// <summary>
+    /// The color volume the platform currently prefers for this target. Render sessions snapshot
+    /// this value when they begin.
+    /// </summary>
+    PlatformSurfaceColorVolume? PreferredColorVolume => null;
 }
 
 public interface IDirect3D11TextureRenderTargetRenderSession : IDisposable

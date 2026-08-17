@@ -79,6 +79,10 @@ namespace Avalonia.Win32.WinRT.Composition
 
         public PlatformSurfaceColorFormat ColorFormat { get; }
 
+        public PlatformSurfaceColorVolume? PreferredColorVolume =>
+            (_window.WindowInfo as EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume)
+            ?.PreferredColorVolume;
+
         public WinUiCompositedWindowRenderTarget(IPlatformGraphicsContext context,
             WinUiCompositedWindow window, IntPtr device,
             ICompositor compositor)

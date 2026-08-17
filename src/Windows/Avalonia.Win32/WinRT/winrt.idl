@@ -301,6 +301,56 @@ interface IActivationFactory : IInspectable
     HRESULT ActivateInstance([out, retval] IntPtr* instance);
 }
 
+// Windows.Devices.Display.DisplayMonitor. Keep the method order in sync with the WinRT ABI: the
+// luminance properties are deliberately read from this API instead of DXGI_OUTPUT_DESC1, whose
+// values don't reliably account for integrated displays.
+[uuid(1F6B15D4-1D01-4C51-87E2-6F954A772B59)]
+interface IDisplayMonitor : IInspectable
+{
+    [propget] HRESULT DeviceId([out] [retval] HSTRING* value);
+    [propget] HRESULT DisplayName([out] [retval] HSTRING* value);
+    [propget] HRESULT ConnectionKind([out] [retval] INT32* value);
+    [propget] HRESULT PhysicalConnector([out] [retval] INT32* value);
+    [propget] HRESULT DisplayAdapterDeviceId([out] [retval] HSTRING* value);
+    [propget] HRESULT DisplayAdapterId([out] [retval] UINT64* value);
+    [propget] HRESULT DisplayAdapterTargetId([out] [retval] UINT32* value);
+    [propget] HRESULT UsageKind([out] [retval] INT32* value);
+    [propget] HRESULT NativeResolutionInRawPixels([out] [retval] UINT64* value);
+    [propget] HRESULT PhysicalSizeInInches([out] [retval] IInspectable** value);
+    [propget] HRESULT RawDpiX([out] [retval] FLOAT* value);
+    [propget] HRESULT RawDpiY([out] [retval] FLOAT* value);
+    [propget] HRESULT RedPrimary([out] [retval] UINT64* value);
+    [propget] HRESULT GreenPrimary([out] [retval] UINT64* value);
+    [propget] HRESULT BluePrimary([out] [retval] UINT64* value);
+    [propget] HRESULT WhitePoint([out] [retval] UINT64* value);
+    [propget] HRESULT MaxLuminanceInNits([out] [retval] FLOAT* value);
+    [propget] HRESULT MinLuminanceInNits([out] [retval] FLOAT* value);
+    [propget] HRESULT MaxAverageFullFrameLuminanceInNits([out] [retval] FLOAT* value);
+}
+
+[uuid(28C0E623-4E46-58C3-AD82-502BDECC4345)]
+interface IDisplayMonitorAsyncOperation : IInspectable
+{
+    HRESULT SetCompleted([in] IDisplayMonitorAsyncOperationCompletedHandler* handler);
+    HRESULT GetCompleted([out] [retval] IDisplayMonitorAsyncOperationCompletedHandler** handler);
+    HRESULT GetResults([out] [retval] IDisplayMonitor** result);
+}
+
+[uuid(620F34A8-5DBA-59DF-B719-99B77970344C)]
+interface IDisplayMonitorAsyncOperationCompletedHandler : IUnknown
+{
+    HRESULT Invoke([in] IDisplayMonitorAsyncOperation* asyncInfo, [in] AsyncStatus asyncStatus);
+}
+
+[uuid(6EAE698F-A228-4C05-821D-B695D667DE8E)]
+interface IDisplayMonitorStatics : IInspectable
+{
+    HRESULT GetDeviceSelector([out] [retval] HSTRING* result);
+    HRESULT FromIdAsync([in] HSTRING deviceId, [out] [retval] IDisplayMonitorAsyncOperation** operation);
+    HRESULT FromInterfaceIdAsync([in] HSTRING deviceInterfaceId,
+        [out] [retval] IDisplayMonitorAsyncOperation** operation);
+}
+
 [flags]
 enum CompositionBatchTypes
 {

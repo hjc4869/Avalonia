@@ -13,6 +13,18 @@ namespace Avalonia.OpenGL.Egl
             PixelSize Size { get; }
             double Scaling { get; }
         }
+
+        /// <summary>
+        /// Optionally supplies the color volume preferred for a window surface.
+        /// </summary>
+        [PrivateApi]
+        public interface IEglWindowGlPlatformSurfaceInfoWithColorVolume : IEglWindowGlPlatformSurfaceInfo
+        {
+            /// <summary>
+            /// Gets the current preferred color volume, or null when it can't be reported.
+            /// </summary>
+            PlatformSurfaceColorVolume? PreferredColorVolume { get; }
+        }
         
         [PrivateApi]
         public interface IEglWindowGlPlatformSurfaceInfoWithWaitPolicy : IEglWindowGlPlatformSurfaceInfo
@@ -52,6 +64,9 @@ namespace Avalonia.OpenGL.Egl
             }
 
             protected override bool SkipWaits { get; }
+
+            protected override PlatformSurfaceColorVolume? PreferredColorVolume =>
+                (_info as IEglWindowGlPlatformSurfaceInfoWithColorVolume)?.PreferredColorVolume;
 
             public override void Dispose() => _glSurface?.Dispose();
 

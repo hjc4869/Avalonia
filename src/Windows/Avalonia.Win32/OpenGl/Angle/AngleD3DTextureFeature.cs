@@ -85,6 +85,9 @@ internal class AngleD3DTextureFeature  : IGlPlatformSurfaceRenderTargetFactory
 
         public override PlatformSurfaceColorFormat ColorFormat => _target.ColorFormat;
 
+        protected override PlatformSurfaceColorVolume? PreferredColorVolume =>
+            _target.PreferredColorVolume;
+
         public override PlatformRenderTargetState State =>
             base.IsCorrupted ? PlatformRenderTargetState.Corrupted : _target.State;
     }

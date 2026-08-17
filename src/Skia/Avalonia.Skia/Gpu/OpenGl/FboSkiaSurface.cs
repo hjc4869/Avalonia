@@ -19,7 +19,8 @@ namespace Avalonia.Skia
 
         private static readonly bool[] TrueFalse = new[] { true, false };
         public FboSkiaSurface(GlSkiaGpu gpu, GRContext grContext, IGlContext glContext, PixelSize pixelSize,
-            GRSurfaceOrigin surfaceOrigin, PlatformSurfaceColorFormat colorFormat = default)
+            GRSurfaceOrigin surfaceOrigin, PlatformSurfaceColorFormat colorFormat = default,
+            PlatformSurfaceColorVolume? preferredColorVolume = null)
         {
             _gpu = gpu;
             _grContext = grContext;
@@ -101,7 +102,7 @@ namespace Avalonia.Skia
                 new GRGlFramebufferInfo((uint)_fbo, colorType.ToGlSizedFormat()));
             using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
             _surface = SKSurface.Create(_grContext, target, surfaceOrigin, colorType,
-                colorFormat.ToSkColorSpace(), properties);
+                colorFormat.ToSkColorSpace(preferredColorVolume), properties);
             CanBlit = gl.IsBlitFramebufferAvailable;
         }
         
