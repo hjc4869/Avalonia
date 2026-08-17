@@ -58,6 +58,7 @@ namespace Avalonia.Skia
             public SKSurface SkSurface => _surface;
             public double ScaleFactor => _glSession.Scaling;
             public PlatformSurfaceColorFormat ColorFormat => _glSession.ColorFormat;
+            public PlatformSurfaceColorVolume? PreferredColorVolume => _glSession.PreferredColorVolume;
         }
         
         public ISkiaGpuRenderSession BeginRenderingSession(IRenderTarget.RenderTargetSceneInfo sceneInfo)

@@ -27,6 +27,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     protected WpFractionalScaleV1? FractionalScale { get; private set; }
     protected WpViewport? Viewport { get; private set; }
     private WpColorManagementSurfaceV1? _colorSurface;
+    private WaylandColorVolumeFeedback? _colorVolumeFeedback;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -131,6 +132,30 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
         }
 
         _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
+        _colorVolumeFeedback = globals.ColorManager?.TryTrackColorVolume(WlSurface, SetPreferredColorVolume);
+    }
+
+    /// <summary>
+    /// The color volume the compositor currently prefers for this surface, or <c>null</c> when it
+    /// can't be determined. Read on the Wayland thread when a render session begins.
+    /// </summary>
+    internal PlatformSurfaceColorVolume? PreferredColorVolume { get; private set; }
+
+    private void SetPreferredColorVolume(PlatformSurfaceColorVolume? volume)
+    {
+        if (PreferredColorVolume == volume)
+            return;
+        PreferredColorVolume = volume;
+        // The next frame has to be rendered against the new luminances.
+        Worker.WakeupRenderLoop();
+        OnPreferredColorVolumeChanged(volume);
+    }
+
+    /// <summary>
+    /// Called on the Wayland thread when the preferred color volume changes.
+    /// </summary>
+    protected virtual void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume)
+    {
     }
 
     private IPlatformRenderSurface[]? _renderSurfaces;
@@ -319,6 +344,12 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             FractionalScale = null;
         }
         // color-management-v1 has the same ordering requirement.
+        if (_colorVolumeFeedback != null)
+        {
+            _colorVolumeFeedback.Dispose();
+            _colorVolumeFeedback = null;
+        }
+        SetPreferredColorVolume(null);
         if (_colorSurface != null)
         {
             _colorSurface.Destroy();
@@ -391,6 +422,9 @@ class WXdgShellSurface : WSurface, IWXdgShellSurface
     }
 
     protected override void OnScaleChanged(double scale) => EventSink.OnScaleChanged(scale);
+
+    protected override void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume) =>
+        EventSink.OnPreferredColorVolumeChanged(volume);
 
     protected override void OnOutputsChanged()
     {

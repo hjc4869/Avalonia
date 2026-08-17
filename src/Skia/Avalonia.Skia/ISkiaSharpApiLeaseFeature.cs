@@ -30,6 +30,13 @@ public interface ISkiaSharpApiLease : IDisposable
     /// The Skia color space of the surface being drawn into, or null when the surface isn't color managed.
     /// </summary>
     SKColorSpace? SkColorSpace => null;
+
+    /// <summary>
+    /// The color volume the platform prefers for the surface being drawn into, or null when the
+    /// platform can't report one. Snapshotted when the frame started, so it stays stable for the
+    /// whole lease.
+    /// </summary>
+    PlatformSurfaceColorVolume? PreferredColorVolume => null;
 }
 
 [Unstable]

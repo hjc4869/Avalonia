@@ -30,5 +30,11 @@ namespace Avalonia.Skia
         /// The pixel encoding and color space <see cref="SkSurface"/> was created with.
         /// </summary>
         PlatformSurfaceColorFormat ColorFormat => default;
+
+        /// <summary>
+        /// The color volume the platform preferred for the target surface when the session began,
+        /// or null when the platform can't report one.
+        /// </summary>
+        PlatformSurfaceColorVolume? PreferredColorVolume => null;
     }
 }

@@ -35,6 +35,13 @@ namespace Avalonia.OpenGL.Egl
 
         public virtual PlatformSurfaceColorFormat ColorFormat => Context.Display.ColorFormat;
 
+        /// <summary>
+        /// The color volume the platform currently prefers for this surface. Read once per frame in
+        /// <see cref="BeginDraw(EglSurface, PixelSize, double, Action?, bool, Action?)"/> so the
+        /// value stays stable for the whole session.
+        /// </summary>
+        protected virtual PlatformSurfaceColorVolume? PreferredColorVolume => null;
+
         public abstract IGlPlatformSurfaceRenderingSession BeginDrawCore(IRenderTarget.RenderTargetSceneInfo sceneInfo);
 
         protected IGlPlatformSurfaceRenderingSession BeginDraw(EglSurface surface,
@@ -72,7 +79,7 @@ namespace Avalonia.OpenGL.Egl
 
                 
                 success = true;
-                return new Session(Context.Display, Context, surface, size, scaling,  restoreContext, onFinish, isYFlipped, SkipWaits, beforeSwap, ColorFormat);
+                return new Session(Context.Display, Context, surface, size, scaling,  restoreContext, onFinish, isYFlipped, SkipWaits, beforeSwap, ColorFormat, PreferredColorVolume);
             }
             finally
             {
@@ -94,12 +101,14 @@ namespace Avalonia.OpenGL.Egl
             public Session(EglDisplay display, EglContext context,
                 EglSurface glSurface, PixelSize size, double scaling,
                 IDisposable restoreContext, Action? onFinish, bool isYFlipped, bool skipWaits,
-                Action? beforeSwap = null, PlatformSurfaceColorFormat colorFormat = default)
+                Action? beforeSwap = null, PlatformSurfaceColorFormat colorFormat = default,
+                PlatformSurfaceColorVolume? preferredColorVolume = null)
             {
                 Size = size;
                 Scaling = scaling;
                 IsYFlipped = isYFlipped;
                 ColorFormat = colorFormat;
+                PreferredColorVolume = preferredColorVolume;
                 _context = context;
                 _display = display;
                 _glSurface = glSurface;
@@ -132,6 +141,7 @@ namespace Avalonia.OpenGL.Egl
             public double Scaling { get; }
             public bool IsYFlipped { get; }
             public PlatformSurfaceColorFormat ColorFormat { get; }
+            public PlatformSurfaceColorVolume? PreferredColorVolume { get; }
         }
 
         public virtual PlatformRenderTargetState State =>

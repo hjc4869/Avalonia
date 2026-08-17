@@ -48,6 +48,24 @@ always safe. Any failure along the way silently degrades to today's 8 bit sRGB b
 Known limitation: the software `WaylandFramebuffer` fallback always renders 8 bit sRGB, so if a
 tagged surface ever falls back to it, colors will be off until the surface is re-tagged.
 
+### Peak luminance / reference white
+
+Every `WSurface` additionally owns a `wp_color_management_surface_feedback_v1`
+(`WaylandColorVolumeFeedback`). It answers "how bright is the display this window is currently on",
+which is per-surface state: the compositor re-evaluates it when the window moves between outputs and
+announces that with `preferred_changed`.
+
+The chain is `get_preferred` → `wp_image_description_v1.ready` → `get_information` →
+`wp_image_description_info_v1.done`. Only `done` publishes; `luminances` provides the primary range
+plus the reference white and `target_luminance` the actually displayable range, whose maximum is the
+peak. Both minimums are scaled by 10000 in the protocol, the other values are plain cd/m². The
+result surfaces as `PlatformSurfaceColorVolume` through the `IPlatformSurfaceColorVolumeFeature`
+top level feature and, snapshotted per frame, on `ISkiaSharpApiLease.PreferredColorVolume`.
+
+Anything less than a complete answer reports `null` rather than a guess: no `wp_color_manager_v1`
+(i.e. `ColorMode.Standard`), a query still in flight, `failed`, or an ICC-only description, which
+carries no luminance events at all.
+
 ### NWayland pitfalls hit here
 
 - Passing an `IWlTargetQueue` **without** a listener throws. Interfaces with no events

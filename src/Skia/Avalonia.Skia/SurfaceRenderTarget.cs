@@ -20,6 +20,7 @@ namespace Avalonia.Skia
         private readonly GRContext? _grContext;
         private readonly ISkiaGpu? _gpu;
         private readonly PlatformSurfaceColorFormat _colorFormat;
+        private readonly PlatformSurfaceColorVolume? _preferredColorVolume;
 
         private class SkiaSurfaceWrapper : ISkiaSurface
         {
@@ -55,6 +56,7 @@ namespace Avalonia.Skia
             _grContext = createInfo.GrContext;
             _gpu = createInfo.Gpu;
             _colorFormat = createInfo.ColorFormat;
+            _preferredColorVolume = createInfo.PreferredColorVolume;
 
             ISkiaSurface? surface = null;
 
@@ -120,6 +122,7 @@ namespace Avalonia.Skia
                 GrContext = _grContext,
                 Gpu = _gpu,
                 ColorFormat = _colorFormat,
+                PreferredColorVolume = _preferredColorVolume,
             };
 
             return new DrawingContextImpl(createInfo, Disposable.Create(() => Version++));
@@ -224,6 +227,12 @@ namespace Avalonia.Skia
             /// non color managed 8 bit sRGB format.
             /// </summary>
             public PlatformSurfaceColorFormat ColorFormat;
+
+            /// <summary>
+            /// Color volume the platform preferred for the top level surface this render target
+            /// ultimately ends up in, or null when it can't be determined.
+            /// </summary>
+            public PlatformSurfaceColorVolume? PreferredColorVolume;
 
             /// <summary>
             /// Render text without Lcd rendering.

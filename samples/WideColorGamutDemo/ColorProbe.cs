@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
 using Avalonia.Themes.Simple;
@@ -24,7 +25,7 @@ internal sealed class App : Application
             {
                 Title = "Avalonia wide color gamut probe",
                 Width = 900,
-                Height = 500,
+                Height = 560,
                 Background = Brushes.Black,
                 Content = new ColorProbe()
             };
@@ -49,17 +50,60 @@ internal sealed class ColorProbe : Control
     /// </summary>
     internal static Action<string> Log { get; set; } = Console.WriteLine;
 
+    private IPlatformSurfaceColorVolumeFeature? _colorVolumeFeature;
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         DispatcherTimer.RunOnce(() => ProbeDrawOp.DumpRequested = true, TimeSpan.FromSeconds(2));
         DispatcherTimer.Run(() => { InvalidateVisual(); return true; }, TimeSpan.FromMilliseconds(200));
+
+        // The preferred color volume is a per-window, per-monitor value: it changes when the window
+        // is dragged to another display or the display's HDR settings change.
+        _colorVolumeFeature = TopLevel.GetTopLevel(this)?.PlatformImpl
+            ?.TryGetFeature<IPlatformSurfaceColorVolumeFeature>();
+        if (_colorVolumeFeature is null)
+        {
+            Log("[probe] platform does not report a preferred color volume");
+            return;
+        }
+
+        _colorVolumeFeature.PreferredColorVolumeChanged += OnPreferredColorVolumeChanged;
+        LogColorVolume("initial");
     }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        if (_colorVolumeFeature is not null)
+            _colorVolumeFeature.PreferredColorVolumeChanged -= OnPreferredColorVolumeChanged;
+        _colorVolumeFeature = null;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnPreferredColorVolumeChanged(object? sender, EventArgs e)
+    {
+        LogColorVolume("changed");
+        InvalidateVisual();
+    }
+
+    private void LogColorVolume(string reason) =>
+        Log($"[probe] preferred color volume ({reason}): {Describe(_colorVolumeFeature?.PreferredColorVolume)}");
+
+    internal static string Describe(PlatformSurfaceColorVolume? volume) => volume is { } v
+        ? string.Format(CultureInfo.InvariantCulture,
+            "primary {0:F4}-{1:F0} nits, reference white {2:F0} nits, target {3:F4}-{4:F0} nits (headroom {5:F2}x)",
+            v.PrimaryLuminance.MinimumNits, v.PrimaryLuminance.MaximumNits, v.ReferenceWhiteNits,
+            v.TargetLuminance.MinimumNits, v.TargetLuminance.MaximumNits, v.HeadroomRatio)
+        : "<unknown>";
 
     public override void Render(DrawingContext context)
     {
         context.FillRectangle(Brushes.Black, new Rect(Bounds.Size));
         context.Custom(new ProbeDrawOp(new Rect(Bounds.Size)));
+
+        var text = new FormattedText(Describe(_colorVolumeFeature?.PreferredColorVolume),
+            CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, 14, Brushes.White);
+        context.DrawText(text, new Point(Gap, Gap + 4 * (Patch + Gap)));
     }
 
     private sealed class ProbeDrawOp : ICustomDrawOperation
@@ -127,10 +171,14 @@ internal sealed class ColorProbe : Control
                     s_primaries[col], s_rowSpaces[row]);
             }
 
-            // Row 3: values above the SDR white level. Only representable on an extended range surface.
+            // Row 3: values above the SDR white level. Only representable on an extended range
+            // surface. When the platform reports the display's actual peak, the ramp runs from
+            // diffuse white up to exactly that peak, so the last patch is the brightest the monitor
+            // can physically produce; otherwise it falls back to a fixed 1x-4x ramp.
+            var headroom = lease.PreferredColorVolume?.HeadroomRatio;
             for (var col = 0; col < 4; col++)
             {
-                var scale = 1f + col;
+                var scale = headroom is { } h ? (float)(1 + (h - 1) * col / 3) : 1f + col;
                 FillPatch(canvas, paint,
                     SKRect.Create(Gap + col * (Patch + Gap), Gap + 3 * (Patch + Gap), Patch, Patch),
                     new SKColorF(scale, scale, scale), s_srgbLinear);
@@ -150,6 +198,7 @@ internal sealed class ColorProbe : Control
             Log($"[probe] IsColorManaged        : {lease.ColorFormat.IsColorManaged}");
             Log($"[probe] IsWideGamut           : {lease.ColorFormat.IsWideGamut}");
             Log($"[probe] IsExtendedRange       : {lease.ColorFormat.IsExtendedRange}");
+            Log($"[probe] Preferred color volume: {Describe(lease.PreferredColorVolume)}");
             Log($"[probe] Skia color space      : {DescribeColorSpace(lease.SkColorSpace)}");
 
             if (lease.SkSurface is not { } surface)
@@ -171,9 +220,10 @@ internal sealed class ColorProbe : Control
                     ReadPixel(surface, (int)centre.X, (int)centre.Y, lease.SkColorSpace));
             }
 
-            // 4x white: 4.0 on an extended range surface, 1.0 when the buffer clamps.
+            // Brightest patch of row 3: the reported peak (or 4x white when the peak is unknown).
+            // Reads back as 1.0 whenever the buffer clamps.
             var hdr = matrix.MapPoint(Gap + 3 * (Patch + Gap) + Patch / 2f, Gap + 3 * (Patch + Gap) + Patch / 2f);
-            Log($"[probe]   4x white      @({hdr.X,4:F0},{hdr.Y,4:F0}) -> " +
+            Log($"[probe]   peak white    @({hdr.X,4:F0},{hdr.Y,4:F0}) -> " +
                 ReadPixel(surface, (int)hdr.X, (int)hdr.Y, lease.SkColorSpace));
 
             Log("[probe] -----------------------------------------------------");

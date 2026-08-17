@@ -37,6 +37,7 @@ namespace Avalonia.Skia
         public GRContext? GrContext => _grContext;
         private readonly ISkiaGpu? _gpu;
         private readonly PlatformSurfaceColorFormat _colorFormat;
+        private readonly PlatformSurfaceColorVolume? _preferredColorVolume;
         private readonly SKPaint _strokePaint = SKPaintCache.Shared.Get();
         private readonly SKPaint _fillPaint = SKPaintCache.Shared.Get();
         private readonly SKPaint _boxShadowPaint = SKPaintCache.Shared.Get();
@@ -92,6 +93,12 @@ namespace Avalonia.Skia
             /// </summary>
             public PlatformSurfaceColorFormat ColorFormat;
 
+            /// <summary>
+            /// Color volume the platform preferred for the target surface when the frame began.
+            /// Snapshotted so it stays stable for the whole frame.
+            /// </summary>
+            public PlatformSurfaceColorVolume? PreferredColorVolume;
+
             public ISkiaGpuRenderSession? CurrentSession;
         }
 
@@ -144,6 +151,7 @@ namespace Avalonia.Skia
                 public double CurrentOpacity => CheckLease(_context._currentOpacity);
                 public PlatformSurfaceColorFormat ColorFormat => _context._colorFormat;
                 public SKColorSpace? SkColorSpace => _context._colorFormat.ToSkColorSpace();
+                public PlatformSurfaceColorVolume? PreferredColorVolume => _context._preferredColorVolume;
 
 
                 public void Dispose()
@@ -203,6 +211,7 @@ namespace Avalonia.Skia
             _grContext = createInfo.GrContext;
             _gpu = createInfo.Gpu;
             _colorFormat = createInfo.ColorFormat;
+            _preferredColorVolume = createInfo.PreferredColorVolume;
             if (_grContext != null)
                 Monitor.Enter(_grContext);
             Surface = createInfo.Surface;
@@ -1510,6 +1519,7 @@ namespace Avalonia.Skia
                 Dpi = _intermediateSurfaceDpi,
                 Format = format,
                 ColorFormat = _colorFormat,
+                PreferredColorVolume = _preferredColorVolume,
                 DisableTextLcdRendering = isLayer ? _disableSubpixelTextRendering : true,
                 GrContext = _grContext,
                 Gpu = _gpu,

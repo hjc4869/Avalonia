@@ -54,6 +54,10 @@ internal sealed class WaylandEglWsiSurface : EglGlPlatformSurfaceBase, IPlatform
 
         public override PlatformSurfaceColorFormat ColorFormat => _graphics.ColorFormat;
 
+        // Read once per frame by the base class, so the whole session (and every Skia lease taken
+        // from it) sees one consistent value even if the compositor changes its mind mid-frame.
+        protected override PlatformSurfaceColorVolume? PreferredColorVolume => _surface.PreferredColorVolume;
+
         public override PlatformRenderTargetState State
         {
             get

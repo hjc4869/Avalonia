@@ -39,6 +39,7 @@ namespace Avalonia.Skia
                 ScaleDrawingToDpi = false,
                 Gpu = _skiaGpu,
                 ColorFormat = session.ColorFormat,
+                PreferredColorVolume = session.PreferredColorVolume,
                 CurrentSession =  session
             };
 

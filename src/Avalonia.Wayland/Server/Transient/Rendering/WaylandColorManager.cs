@@ -184,6 +184,15 @@ internal sealed class WaylandColorManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Starts tracking the color volume the compositor prefers for <paramref name="surface"/>.
+    /// <paramref name="publish"/> is invoked on the Wayland thread whenever the answer changes.
+    /// The returned object must be disposed before the <c>wl_surface</c> it was created from.
+    /// </summary>
+    public WaylandColorVolumeFeedback? TryTrackColorVolume(WlSurface surface,
+        Action<PlatformSurfaceColorVolume?> publish)
+        => WaylandColorVolumeFeedback.TryCreate(_connection, _manager, surface, publish);
+
     // Perceptual is the only intent the protocol requires every compositor to support.
     private WpColorManagerV1.RenderIntentEnum PreferredRenderIntent =>
         _renderIntents.Contains(WpColorManagerV1.RenderIntentEnum.Relative)
