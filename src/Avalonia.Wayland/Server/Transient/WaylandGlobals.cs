@@ -11,6 +11,7 @@ using NWayland.Interop;
 using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
+using NWayland.Protocols.Plasma.Appmenu;
 using NWayland.Protocols.TextInputUnstableV3;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -52,6 +53,14 @@ class WaylandGlobals
     /// every toplevel (no SSD negotiation will be attempted).
     /// </summary>
     public ZxdgDecorationManagerV1? XdgDecorationManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>org_kde_kwin_appmenu_manager</c> (KWin). This is the
+    /// only way to associate a toplevel with an exported dbusmenu on Wayland: KDE's
+    /// com.canonical.AppMenu.Registrar translates registrations into X11 window properties and is
+    /// therefore a no-op outside of X11.
+    /// </summary>
+    public OrgKdeKwinAppmenuManager? AppmenuManager { get; }
 
     /// <summary>
     /// Bound when the compositor advertises <c>wp_color_manager_v1</c> and the app opted in via
@@ -168,6 +177,7 @@ class WaylandGlobals
         XdgDecorationManager = platformOptions.ForceDrawnDecorationsInternal
             ? null
             : Bind<ZxdgDecorationManagerV1>(1, 1, null);
+        AppmenuManager = Bind<OrgKdeKwinAppmenuManager>(1, 2, null);
         
         // Seats may have been announced before the data-device manager / text-input
         // manager were bound — InputDispatcher backfills now and constructs the

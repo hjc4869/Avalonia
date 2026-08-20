@@ -11,6 +11,7 @@ using Avalonia.Wayland.Server.Transient;
 using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
+using NWayland.Protocols.Plasma.Appmenu;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
 using NWayland.Protocols.XdgDecorationUnstableV1;
@@ -608,6 +609,10 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
     // TODO: Wait for V2 version of the protocol to gain more adoption and implement it on our side
     private bool _csdSticky;
 
+    private OrgKdeKwinAppmenu? _appmenu;
+    private string? _appmenuServiceName;
+    private string? _appmenuObjectPath;
+
     public WXdgTopLevel(WaylandWorker worker, WXdgTopLevelEventSinkProxy eventSink) : base(worker, eventSink)
     {
         _topLevelEventSink = eventSink;
@@ -632,6 +637,8 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
         // Re-apply cached title on reconnect.
         if (_title != null)
             _xdgTopLevel.SetTitle(_title);
+
+        ApplyAppmenuAddress();
 
         // Re-apply cached min/max if they were ever set on a previous
         // (now-dead) connection. The OnConnected commit below will
@@ -785,6 +792,28 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
         _decoration = null;
     }
 
+    public void SetAppmenuAddress(string serviceName, string objectPath)
+    {
+        _appmenuServiceName = serviceName;
+        _appmenuObjectPath = objectPath;
+        ApplyAppmenuAddress();
+    }
+
+    private void ApplyAppmenuAddress()
+    {
+        if (_appmenuServiceName is not { } serviceName || _appmenuObjectPath is not { } objectPath)
+            return;
+        if (Globals?.AppmenuManager is not { } manager || WlSurface is not { } surface
+            || Connection is not { } connection)
+            return;
+        _appmenu ??= manager.Create(surface, new AppmenuListener(), connection.Queue);
+        _appmenu.SetAddress(serviceName, objectPath);
+    }
+
+    // org_kde_kwin_appmenu has no events, but NWayland requires a listener whenever a target queue
+    // is specified.
+    private sealed class AppmenuListener : OrgKdeKwinAppmenu.Listener;
+
     internal class TopLevelListener(WXdgTopLevel p) : XdgToplevel.Listener
     {
         protected override void ConfigureBounds(XdgToplevel eventSender, int width, int height) => 
@@ -806,6 +835,12 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
         foreach (var ex in _activeExports.ToList())
             ex.Dispose();
         _activeExports.Clear();
+        if (_appmenu != null)
+        {
+            _appmenu.Release();
+            _appmenu.Dispose();
+            _appmenu = null;
+        }
         _decoration?.Destroy();
         _decoration = null;
         _xdgTopLevel?.Destroy();

@@ -48,6 +48,11 @@ partial class WindowImpl
             if (Parent._title != null)
                 _surfaceProxy.SetTitle(Parent._title);
 
+            // org_kde_kwin_appmenu is per-surface, so the exported menu's address has to be
+            // re-published against the fresh surface.
+            if (Parent._appmenuAddress is { } appmenu)
+                _surfaceProxy.SetAppmenuAddress(appmenu.ServiceName, appmenu.ObjectPath);
+
             // Re-apply cached min/max size constraints after a fresh worker
             // surface is created. null on both sides means SetMinMaxSize was
             // never called (or both bounds are unconstrained) — nothing to push.

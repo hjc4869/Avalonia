@@ -60,6 +60,15 @@ internal interface IWXdgTopLevel : IWXdgShellSurface
     /// committed a buffer). Idempotent.
     /// </summary>
     void DestroyDecoration();
+
+    /// <summary>
+    /// Publishes the DBus address of this toplevel's exported dbusmenu through
+    /// <c>org_kde_kwin_appmenu</c>, which is how KWin associates a window with a global menu on
+    /// Wayland. Cached by the worker so it's re-sent after a compositor reconnect; a no-op when the
+    /// compositor doesn't advertise the protocol.
+    /// </summary>
+    void SetAppmenuAddress(string serviceName, string objectPath);
+
     /// <summary>
     /// Synchronously creates an xdg-foreign-v2 export of this toplevel; the returned
     /// façade's HandleTask completes asynchronously when the compositor delivers the

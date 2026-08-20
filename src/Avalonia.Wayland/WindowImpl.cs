@@ -37,6 +37,9 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
     private bool _csdSticky;
     private string? _title;
     private FallbackStorageProvider? _storageProvider;
+    private ITopLevelNativeMenuExporter? _nativeMenuExporter;
+    private bool _nativeMenuExporterQueried;
+    private (string ServiceName, string ObjectPath)? _appmenuAddress;
 
     public WindowImpl(WaylandWorkerClient client) : base(client)
     {
@@ -105,7 +108,38 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
             return _textInputMethod ??= new WaylandTextInputMethod(this);
         if (featureType == typeof(IStorageProvider))
             return _storageProvider ??= new FallbackStorageProvider(BuildStorageFactories());
+        if (featureType == typeof(ITopLevelNativeMenuExporter))
+            return GetNativeMenuExporter();
         return base.TryGetFeature(featureType);
+    }
+
+    /// <summary>
+    /// Wayland has no global menu protocol of its own, so the menu is exported over DBus and the
+    /// window is associated with it through KWin's <c>org_kde_kwin_appmenu</c>. When no shell picks
+    /// the menu up, nothing ever asks for the layout, the exporter stays unexported and the
+    /// framework falls back to an in-window menu.
+    /// </summary>
+    private ITopLevelNativeMenuExporter? GetNativeMenuExporter()
+    {
+        if (!_nativeMenuExporterQueried)
+        {
+            _nativeMenuExporterQueried = true;
+            _nativeMenuExporter = DBusMenuExporter.TryCreateTopLevelNativeMenu();
+            if (_nativeMenuExporter is IDBusMenuAddressProvider { ServiceName: { } serviceName } address)
+            {
+                _appmenuAddress = (serviceName, address.ObjectPath);
+                _surfaceProxy?.SetAppmenuAddress(serviceName, address.ObjectPath);
+            }
+        }
+
+        return _nativeMenuExporter;
+    }
+
+    public override void Dispose()
+    {
+        (_nativeMenuExporter as IDisposable)?.Dispose();
+        _nativeMenuExporter = null;
+        base.Dispose();
     }
 
     private Func<Task<IStorageProvider?>>[] BuildStorageFactories() => new Func<Task<IStorageProvider?>>[]
