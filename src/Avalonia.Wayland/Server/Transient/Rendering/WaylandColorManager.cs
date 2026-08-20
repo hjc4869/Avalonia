@@ -22,6 +22,9 @@ internal sealed class WaylandColorManager : IDisposable
     // we don't consume. Binding v1 keeps us compatible with the widest set of compositors.
     private const uint BindVersion = 1;
 
+    // scRGB's own reference white, which is what signal 1.0 stands for on an extended linear surface.
+    private const uint ScRgbReferenceWhiteNits = 80;
+
     private readonly WaylandConnection _connection;
     private WpColorManagerV1 _manager = null!;
     private readonly HashSet<WpColorManagerV1.FeatureEnum> _features = new();
@@ -115,7 +118,7 @@ internal sealed class WaylandColorManager : IDisposable
             _imageDescriptionReady = false;
             // Windows-scRGB is only used as a fallback: it pins signal 1.0 to 80 cd/m² rather than to
             // the reference white, which makes ordinary SDR content noticeably dimmer. The parametric
-            // description keeps the sRGB default luminances, where 1.0 *is* the reference white,
+            // description keeps the sRGB reference white, where 1.0 *is* the reference white,
             // matching EGL_EXT_gl_colorspace_scrgb_linear.
             if (colorSpace == PlatformColorSpace.ScRgbLinear && !SupportsParametricExtendedLinear)
             {
@@ -129,6 +132,14 @@ internal sealed class WaylandColorManager : IDisposable
                 var creator = _manager.CreateParametricCreator(new ParamsCreatorListener(), _connection.Queue);
                 creator.SetPrimariesNamed(ToWaylandPrimaries(colorSpace));
                 creator.SetTfNamed(ToWaylandTransferFunction(colorSpace));
+
+                // Linear light is absolute: 0 is no emission at all, not the 0.2 cd/m² the
+                // protocol otherwise defaults the primary volume's minimum to. Left at the default
+                // the compositor has a black floor to map out of the surface, and it arrives as
+                // lifted shadows. Only the reference white is kept, so 1.0 still means white.
+                if (colorSpace == PlatformColorSpace.ScRgbLinear && SupportsSetLuminances)
+                    creator.SetLuminances(0, ScRgbReferenceWhiteNits, ScRgbReferenceWhiteNits);
+
                 // `create` is a destructor request. Passing an explicit target queue here makes
                 // NWayland route it through a proxy wrapper and then destroy the wrapper, which
                 // aborts inside libwayland, so the image description inherits the creator's queue
@@ -203,6 +214,9 @@ internal sealed class WaylandColorManager : IDisposable
         _features.Contains(WpColorManagerV1.FeatureEnum.Parametric)
         && _transferFunctions.Contains(WpColorManagerV1.TransferFunctionEnum.ExtLinear)
         && _primaries.Contains(WpColorManagerV1.PrimariesEnum.Srgb);
+
+    private bool SupportsSetLuminances =>
+        _features.Contains(WpColorManagerV1.FeatureEnum.SetLuminances);
 
     private static WpColorManagerV1.PrimariesEnum ToWaylandPrimaries(PlatformColorSpace colorSpace) =>
         colorSpace switch

@@ -48,6 +48,13 @@ always safe. Any failure along the way silently degrades to today's 8 bit sRGB b
 Known limitation: the software `WaylandFramebuffer` fallback always renders 8 bit sRGB, so if a
 tagged surface ever falls back to it, colors will be off until the surface is re-tagged.
 
+The extended linear description also sets its luminances explicitly, because the protocol's default
+primary color volume minimum is 0.2 cd/m² and linear light has no such floor: 0 is no emission at
+all. Left at the default, the compositor has a black level to map out of the surface and it arrives
+as lifted shadows, which is the one thing an extended range surface is supposed to reproduce exactly.
+Only the minimum is changed; the maximum and reference white stay at scRGB's 80 cd/m², so signal 1.0
+still means the reference white.
+
 ### Peak luminance / reference white
 
 Every `WSurface` additionally owns a `wp_color_management_surface_feedback_v1`
