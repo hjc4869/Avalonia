@@ -74,10 +74,13 @@ internal static unsafe class DisplayMonitorColorVolume
 
             var referenceWhite = state.SdrWhiteLevel.Value / 1000.0 * ScRgbReferenceWhiteNits;
             return new PlatformSurfaceColorVolume(
-                new PlatformLuminanceRange(0, ScRgbReferenceWhiteNits), referenceWhite, target);
+                new PlatformLuminanceRange(0, ScRgbReferenceWhiteNits), referenceWhite, target,
+                PlatformTransferFunction.Pq);
         }
 
-        return new PlatformSurfaceColorVolume(target, maximumNits, target);
+        // DXGI defines the standard swap chain color space, RGB_FULL_G22_NONE_P709, as the sRGB
+        // curve: "linear segment + 2.4 power", despite the G22 in its name.
+        return new PlatformSurfaceColorVolume(target, maximumNits, target, PlatformTransferFunction.Srgb);
     }
 
     internal static bool TryGetDisplayColorState(

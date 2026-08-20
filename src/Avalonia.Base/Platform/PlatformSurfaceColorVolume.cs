@@ -14,6 +14,40 @@ public readonly record struct PlatformLuminanceRange(
     double MaximumNits);
 
 /// <summary>
+/// How the channel values of an encoding map to light.
+/// </summary>
+[Unstable]
+public enum PlatformTransferFunction : byte
+{
+    /// <summary>The platform did not report one.</summary>
+    Unknown = 0,
+
+    /// <summary>
+    /// A pure power law, whose exponent is <see cref="PlatformSurfaceColorVolume.TransferExponent"/>.
+    /// Gamma 2.2, the ordinary case for an SDR display, is reported this way.
+    /// </summary>
+    Power,
+
+    /// <summary>The sRGB curve of IEC 61966-2-1: a linear segment, then a 2.4 power.</summary>
+    Srgb,
+
+    /// <summary>Rec. ITU-R BT.1886.</summary>
+    Bt1886,
+
+    /// <summary>Linear light, which is what an extended range surface stores.</summary>
+    Linear,
+
+    /// <summary>SMPTE ST 2084, the perceptual quantizer.</summary>
+    Pq,
+
+    /// <summary>Rec. ITU-R BT.2100 hybrid log-gamma.</summary>
+    Hlg,
+
+    /// <summary>SMPTE ST 428-1.</summary>
+    St428
+}
+
+/// <summary>
 /// The color volume the platform currently prefers a surface to be rendered for, i.e. what the
 /// display the surface is shown on can actually reproduce.
 /// </summary>
@@ -25,16 +59,35 @@ public readonly record struct PlatformLuminanceRange(
 /// The luminance range that can actually be displayed. Its maximum is the peak luminance available
 /// for highlights, and may use a different scale than <paramref name="PrimaryLuminance"/>.
 /// </param>
+/// <param name="Transfer">
+/// The transfer function of the preferred encoding, or <see cref="PlatformTransferFunction.Unknown"/>
+/// where the platform does not say.
+/// </param>
+/// <param name="TransferExponent">
+/// The exponent of <paramref name="Transfer"/> when it is <see cref="PlatformTransferFunction.Power"/>,
+/// and 0 otherwise.
+/// </param>
 /// <remarks>
+/// <para>
 /// Unlike <see cref="PlatformSurfaceColorFormat"/>, which describes the stable encoding a surface
 /// was created with, this changes at runtime — most commonly when a window is moved to another
 /// monitor or the display's HDR configuration changes.
+/// </para>
+/// <para>
+/// <paramref name="Transfer"/> is what a drawing operation rendering into an extended range surface
+/// has to know: the platform converts that surface's linear light into the preferred encoding on the
+/// way to the display, so anything wanting to reproduce a signal it was handed has to undo exactly
+/// this curve rather than assume one. The platforms disagree on which curve an ordinary surface
+/// carries, and the difference is worth several code points in the shadows.
+/// </para>
 /// </remarks>
 [Unstable]
 public readonly record struct PlatformSurfaceColorVolume(
     PlatformLuminanceRange PrimaryLuminance,
     double ReferenceWhiteNits,
-    PlatformLuminanceRange TargetLuminance)
+    PlatformLuminanceRange TargetLuminance,
+    PlatformTransferFunction Transfer = PlatformTransferFunction.Unknown,
+    double TransferExponent = 0)
 {
     /// <summary>
     /// How much brighter than diffuse white the display can go, i.e.

@@ -62,6 +62,15 @@ peak. Both minimums are scaled by 10000 in the protocol, the other values are pl
 result surfaces as `PlatformSurfaceColorVolume` through the `IPlatformSurfaceColorVolumeFeature`
 top level feature and, snapshotted per frame, on `ISkiaSharpApiLease.PreferredColorVolume`.
 
+The same round trip carries `tf_named`/`tf_power`, reported as `PlatformSurfaceColorVolume.Transfer`.
+That is the curve the compositor encodes this surface's content with on the way to the display, and
+it is the only way to know it: the protocol leaves an untagged surface "compositor implementation
+defined", and its `srgb` name was ambiguous enough that version 2 renamed the piece-wise curve to
+`compound_power_2_4`. A named power law, which is what both KWin and Mutter report for an SDR output,
+is reported as `Power` with the exponent rather than under a name of its own, so a client that has to
+put a signal into linear light for an extended range surface can undo exactly what will be re-applied
+instead of assuming a curve.
+
 Anything less than a complete answer reports `null` rather than a guess: no `wp_color_manager_v1`
 (i.e. `ColorMode.Standard`), a query still in flight, `failed`, or an ICC-only description, which
 carries no luminance events at all.

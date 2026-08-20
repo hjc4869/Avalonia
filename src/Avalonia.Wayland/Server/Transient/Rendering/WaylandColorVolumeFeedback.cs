@@ -111,7 +111,8 @@ internal sealed class WaylandColorVolumeFeedback : IDisposable
         // ICC based descriptions only carry an ICC profile, so there is nothing to report.
         Publish(query.Primary is { } primary && query.ReferenceWhiteNits is { } referenceWhite
                                              && query.Target is { } target
-            ? new PlatformSurfaceColorVolume(primary, referenceWhite, target)
+            ? new PlatformSurfaceColorVolume(primary, referenceWhite, target, query.Transfer,
+                query.TransferExponent)
             : null);
     }
 
@@ -153,6 +154,8 @@ internal sealed class WaylandColorVolumeFeedback : IDisposable
         public PlatformLuminanceRange? Primary;
         public double? ReferenceWhiteNits;
         public PlatformLuminanceRange? Target;
+        public PlatformTransferFunction Transfer;
+        public double TransferExponent;
     }
 
     private sealed class FeedbackListener(WaylandColorVolumeFeedback p) : WpColorManagementSurfaceFeedbackV1.Listener
@@ -184,7 +187,60 @@ internal sealed class WaylandColorVolumeFeedback : IDisposable
         protected override void TargetLuminance(WpImageDescriptionInfoV1 eventSender, uint minLum, uint maxLum)
             => query.Target = new PlatformLuminanceRange(minLum / 10000.0, maxLum);
 
+        protected override void TfNamed(WpImageDescriptionInfoV1 eventSender,
+            WpColorManagerV1.TransferFunctionEnum tf)
+        {
+            query.Transfer = ToPlatformTransferFunction(tf, out var exponent);
+            query.TransferExponent = exponent;
+        }
+
+        // Exponents are scaled by 10000 to carry 4 decimals.
+        protected override void TfPower(WpImageDescriptionInfoV1 eventSender, uint eexp)
+        {
+            query.Transfer = PlatformTransferFunction.Power;
+            query.TransferExponent = eexp / 10000.0;
+        }
+
         protected override void Done(WpImageDescriptionInfoV1 eventSender)
             => p.OnInfoDone(query, eventSender);
+    }
+
+    /// <summary>
+    /// Maps a named transfer function onto the platform-independent one. A named pure power law is
+    /// reported as one, so a client never has to know that gamma 2.2 has a name of its own here.
+    /// </summary>
+    private static PlatformTransferFunction ToPlatformTransferFunction(
+        WpColorManagerV1.TransferFunctionEnum tf, out double exponent)
+    {
+        exponent = 0;
+        switch (tf)
+        {
+            case WpColorManagerV1.TransferFunctionEnum.Gamma22:
+                exponent = 2.2;
+                return PlatformTransferFunction.Power;
+            case WpColorManagerV1.TransferFunctionEnum.Gamma28:
+                exponent = 2.8;
+                return PlatformTransferFunction.Power;
+
+            // Version 2 renamed the piece-wise curve, because `srgb` was read as the display gamma
+            // it approximates at least as often as the curve itself.
+            case WpColorManagerV1.TransferFunctionEnum.Srgb:
+            case WpColorManagerV1.TransferFunctionEnum.ExtSrgb:
+            case WpColorManagerV1.TransferFunctionEnum.CompoundPower24:
+                return PlatformTransferFunction.Srgb;
+
+            case WpColorManagerV1.TransferFunctionEnum.Bt1886:
+                return PlatformTransferFunction.Bt1886;
+            case WpColorManagerV1.TransferFunctionEnum.ExtLinear:
+                return PlatformTransferFunction.Linear;
+            case WpColorManagerV1.TransferFunctionEnum.St2084Pq:
+                return PlatformTransferFunction.Pq;
+            case WpColorManagerV1.TransferFunctionEnum.Hlg:
+                return PlatformTransferFunction.Hlg;
+            case WpColorManagerV1.TransferFunctionEnum.St428:
+                return PlatformTransferFunction.St428;
+            default:
+                return PlatformTransferFunction.Unknown;
+        }
     }
 }
