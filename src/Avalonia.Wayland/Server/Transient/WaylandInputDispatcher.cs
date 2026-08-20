@@ -7,6 +7,7 @@ using Avalonia.Wayland.Server.Transient.Clipboard;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Persistent;
 using NWayland;
+using NWayland.Protocols.CursorShapeV1;
 using NWayland.Protocols.Wayland;
 
 namespace Avalonia.Wayland.Server.Transient;
@@ -269,6 +270,7 @@ partial class WaylandInputDispatcher : IDisposable
         private readonly WaylandInputDispatcher _dispatcher;
         private readonly Seat _seat;
         private readonly WlPointer _pointer;
+        private readonly WpCursorShapeDeviceV1? _cursorShapeDevice;
 
         // Persistent pointer state (survives across frames)
         private WSurfaceEventSinkProxy? _focusedSink;
@@ -307,16 +309,33 @@ partial class WaylandInputDispatcher : IDisposable
             _dispatcher = dispatcher;
             _seat = seat;
             _pointer = seat.WlSeat.GetPointer(new Listener(this));
+            _cursorShapeDevice = dispatcher._globals.CursorShapeManager?.GetPointer(_pointer, null);
         }
 
         // Shared, stateless fallback used when a surface hasn't requested a specific cursor.
         private static readonly WaylandStandardCursor s_defaultCursor = new(StandardCursorType.Arrow);
 
+        /// <summary>
+        /// Names the cursor through <c>cursor-shape-v1</c> when possible so the compositor draws it
+        /// from the user's theme at the right size. Returns false for cursors with no named shape
+        /// (custom bitmaps, hiding the pointer) which still need <c>wl_pointer.set_cursor</c>.
+        /// </summary>
+        private bool TrySetCursorShape(WpCursorShapeDeviceV1.ShapeEnum? shape)
+        {
+            if (_cursorShapeDevice is null || shape is not { } s)
+                return false;
+            _cursorShapeDevice.SetShape(_lastEnterSerial, s);
+            return true;
+        }
+
         private void UpdateCursor()
         {
             if (_focusedSurface == null)
                 return;
-            var image = (_focusedSurface.CurrentCursor ?? s_defaultCursor).Resolve(_dispatcher._globals);
+            var cursor = _focusedSurface.CurrentCursor ?? s_defaultCursor;
+            if (TrySetCursorShape(cursor.Shape))
+                return;
+            var image = cursor.Resolve(_dispatcher._globals);
             if (image is { } c)
                 _pointer.SetCursor(_lastEnterSerial, c.Surface, c.HotspotX, c.HotspotY);
             else
@@ -341,6 +360,8 @@ partial class WaylandInputDispatcher : IDisposable
         /// </remarks>
         internal void SetDndCursor(StandardCursorType cursorType)
         {
+            if (TrySetCursorShape(WaylandStandardCursor.GetShape(cursorType)))
+                return;
             var cursorInfo = _dispatcher._globals.CursorManager.GetCursor(cursorType);
             if (cursorInfo is { } c)
                 _pointer.SetCursor(_lastEnterSerial, c.Surface, c.HotspotX, c.HotspotY);
@@ -362,6 +383,7 @@ partial class WaylandInputDispatcher : IDisposable
 
         public void Dispose()
         {
+            _cursorShapeDevice?.Dispose();
             _pointer.Release();
         }
 

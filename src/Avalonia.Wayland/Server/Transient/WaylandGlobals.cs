@@ -9,6 +9,7 @@ using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland;
 using NWayland.Interop;
 using NWayland.Protocols.ColorManagementV1;
+using NWayland.Protocols.CursorShapeV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
 using NWayland.Protocols.Plasma.Appmenu;
@@ -76,6 +77,14 @@ class WaylandGlobals
     /// and therefore treated as plain sRGB by the compositor.
     /// </summary>
     public WaylandColorManager? ColorManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>wp_cursor_shape_manager_v1</c>. When present, standard
+    /// cursors are named rather than drawn by us, so the compositor picks the image from the user's
+    /// theme at the right size and scale. <c>null</c> means every cursor goes through the
+    /// locally themed surfaces of <see cref="CursorManager"/>.
+    /// </summary>
+    public WpCursorShapeManagerV1? CursorShapeManager { get; }
 
     public bool HasFractionalScaling => FractionalScaleManager != null && Viewporter != null;
 
@@ -166,6 +175,7 @@ class WaylandGlobals
         WlCompositor = BindRequired<WlCompositor>(4, 6, null);
         XdgWmBase = BindRequired<XdgWmBase>(3, 4, new XdgWmBaseListener());
         CursorManager = new WaylandCursorManager(connection.Display, WlShm, WlCompositor);
+        CursorShapeManager = Bind<WpCursorShapeManagerV1>(1, 2, null);
         DataDeviceManager = Bind<WlDataDeviceManager>(3, 3, null);
         LinuxDmabuf = Bind<ZwpLinuxDmabufV1>(4, 4, null);
         FractionalScaleManager = Bind<WpFractionalScaleManagerV1>(1, 1, null);
