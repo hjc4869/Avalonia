@@ -34,6 +34,7 @@ internal sealed class WaylandColorManager : IDisposable
 
     private WpImageDescriptionV1? _imageDescription;
     private bool _imageDescriptionReady;
+    private bool _usesAbsoluteScRgb;
 
     private WaylandColorManager(WaylandConnection connection)
     {
@@ -122,6 +123,7 @@ internal sealed class WaylandColorManager : IDisposable
             // matching EGL_EXT_gl_colorspace_scrgb_linear.
             if (colorSpace == PlatformColorSpace.ScRgbLinear && !SupportsParametricExtendedLinear)
             {
+                _usesAbsoluteScRgb = true;
                 _imageDescription = _manager.CreateWindowsScrgb(
                     new ImageDescriptionListener(this), _connection.Queue);
             }
@@ -202,7 +204,16 @@ internal sealed class WaylandColorManager : IDisposable
     /// </summary>
     public WaylandColorVolumeFeedback? TryTrackColorVolume(WlSurface surface,
         Action<PlatformSurfaceColorVolume?> publish)
-        => WaylandColorVolumeFeedback.TryCreate(_connection, _manager, surface, publish);
+        => WaylandColorVolumeFeedback.TryCreate(_connection, _manager, surface,
+            volume => publish(volume is { } value
+                ? value with { SurfaceNitsPerUnit = SurfaceNitsPerUnit(value) }
+                : null));
+
+    // Only the manager knows what the surface was tagged with. A parametric description is relative,
+    // so the compositor re-anchors its reference white to the display's and 1.0 arrives as diffuse
+    // white; Windows-scRGB instead pins 1.0 to 80 cd/m² whatever the display is set to.
+    private double SurfaceNitsPerUnit(PlatformSurfaceColorVolume volume) =>
+        _usesAbsoluteScRgb ? ScRgbReferenceWhiteNits : volume.ReferenceWhiteNits;
 
     // Perceptual is the only intent the protocol requires every compositor to support.
     private WpColorManagerV1.RenderIntentEnum PreferredRenderIntent =>

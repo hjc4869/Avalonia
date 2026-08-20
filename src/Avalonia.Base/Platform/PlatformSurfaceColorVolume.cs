@@ -67,6 +67,9 @@ public enum PlatformTransferFunction : byte
 /// The exponent of <paramref name="Transfer"/> when it is <see cref="PlatformTransferFunction.Power"/>,
 /// and 0 otherwise.
 /// </param>
+/// <param name="SurfaceNitsPerUnit">
+/// What numeric 1.0 on the surface is worth, in nits, or 0 where the platform does not say.
+/// </param>
 /// <remarks>
 /// <para>
 /// Unlike <see cref="PlatformSurfaceColorFormat"/>, which describes the stable encoding a surface
@@ -80,6 +83,13 @@ public enum PlatformTransferFunction : byte
 /// this curve rather than assume one. The platforms disagree on which curve an ordinary surface
 /// carries, and the difference is worth several code points in the shadows.
 /// </para>
+/// <para>
+/// <paramref name="SurfaceNitsPerUnit"/> is what an extended range surface has to be scaled by:
+/// it is <paramref name="ReferenceWhiteNits"/> wherever the platform re-anchors the surface to the
+/// display's diffuse white itself, and scRGB's own 80 cd/m² where 1.0 is instead pinned absolutely,
+/// which is what the DWM does on an HDR display. Diffuse white therefore belongs at
+/// <paramref name="ReferenceWhiteNits"/> / <paramref name="SurfaceNitsPerUnit"/>, not at 1.0.
+/// </para>
 /// </remarks>
 [Unstable]
 public readonly record struct PlatformSurfaceColorVolume(
@@ -87,8 +97,19 @@ public readonly record struct PlatformSurfaceColorVolume(
     double ReferenceWhiteNits,
     PlatformLuminanceRange TargetLuminance,
     PlatformTransferFunction Transfer = PlatformTransferFunction.Unknown,
-    double TransferExponent = 0)
+    double TransferExponent = 0,
+    double SurfaceNitsPerUnit = 0)
 {
+    /// <summary>
+    /// What diffuse white is worth in the surface's own numbers, i.e. what an extended range
+    /// surface has to write for it. 1.0 unless the platform pins 1.0 to something else.
+    /// </summary>
+    public double ReferenceWhiteScale =>
+        SurfaceNitsPerUnit > 0 && ReferenceWhiteNits > 0 &&
+        double.IsFinite(SurfaceNitsPerUnit) && double.IsFinite(ReferenceWhiteNits)
+            ? ReferenceWhiteNits / SurfaceNitsPerUnit
+            : 1.0;
+
     /// <summary>
     /// How much brighter than diffuse white the display can go, i.e.
     /// <see cref="TargetLuminance"/>'s maximum expressed in multiples of

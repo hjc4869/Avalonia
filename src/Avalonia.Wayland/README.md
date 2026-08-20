@@ -82,6 +82,13 @@ Anything less than a complete answer reports `null` rather than a guess: no `wp_
 (i.e. `ColorMode.Standard`), a query still in flight, `failed`, or an ICC-only description, which
 carries no luminance events at all.
 
+`SurfaceNitsPerUnit` is filled in by `WaylandColorManager` rather than by the feedback object,
+because only it knows what the surface was tagged with. A parametric description is relative, so the
+compositor re-anchors its reference white to the display's and numeric 1.0 arrives as diffuse white;
+the Windows-scRGB fallback instead pins 1.0 to 80 cd/m² whatever the display is set to, and content
+has to be scaled up to compensate. The DWM does the same on an HDR display, which is why the value
+exists at all rather than being assumed to be the reference white.
+
 ### NWayland pitfalls hit here
 
 - Passing an `IWlTargetQueue` **without** a listener throws. Interfaces with no events

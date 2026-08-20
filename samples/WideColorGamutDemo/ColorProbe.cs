@@ -96,12 +96,13 @@ internal sealed class ColorProbe : Control
 
     internal static string Describe(PlatformSurfaceColorVolume? volume) => volume is { } v
         ? string.Format(CultureInfo.InvariantCulture,
-            "primary {0:F4}-{1:F0} nits, reference white {2:F0} nits, target {3:F4}-{4:F0} nits (headroom {5:F2}x), transfer {6}",
+            "primary {0:F4}-{1:F0} nits, reference white {2:F0} nits, target {3:F4}-{4:F0} nits (headroom {5:F2}x), transfer {6}, {7:F0} nits/unit (white at {8:F2})",
             v.PrimaryLuminance.MinimumNits, v.PrimaryLuminance.MaximumNits, v.ReferenceWhiteNits,
             v.TargetLuminance.MinimumNits, v.TargetLuminance.MaximumNits, v.HeadroomRatio,
             v.Transfer == PlatformTransferFunction.Power
                 ? string.Format(CultureInfo.InvariantCulture, "power {0:F2}", v.TransferExponent)
-                : v.Transfer.ToString())
+                : v.Transfer.ToString(),
+            v.SurfaceNitsPerUnit, v.ReferenceWhiteScale)
         : "<unknown>";
 
     public override void Render(DrawingContext context)
