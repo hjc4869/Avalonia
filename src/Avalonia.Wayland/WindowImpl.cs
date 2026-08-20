@@ -36,6 +36,7 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
     // This is a limitation of V1 of the protocol that's supported in the wild
     private bool _csdSticky;
     private string? _title;
+    private WaylandIconData? _icon;
     private FallbackStorageProvider? _storageProvider;
     private ITopLevelNativeMenuExporter? _nativeMenuExporter;
     private bool _nativeMenuExporterQueried;
@@ -306,7 +307,11 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
         ExtendClientAreaToDecorationsChanged?.Invoke(IsClientAreaExtendedToDecorations);
     }
 
-    public void SetIcon(IWindowIconImpl? icon) { }
+    public void SetIcon(IWindowIconImpl? icon)
+    {
+        _icon = WaylandIconData.TryCreate(icon);
+        _surfaceProxy?.SetIcon(_icon);
+    }
     public void ShowTaskbarIcon(bool value) { }
     public void CanResize(bool value) => _canResize = value;
     public void SetCanMinimize(bool value) { }

@@ -50,6 +50,13 @@ internal interface IWXdgTopLevel : IWXdgShellSurface
     void SetTitle(string? title);
 
     /// <summary>
+    /// Sets the toplevel's icon through <c>xdg_toplevel_icon_v1</c>. A <c>null</c> value resets the
+    /// toplevel to its default (desktop-entry) icon. The worker caches the pixel data so it
+    /// survives compositor reconnects; a no-op when the compositor doesn't advertise the protocol.
+    /// </summary>
+    void SetIcon(WaylandIconData? icon);
+
+    /// <summary>
     /// Tear down the worker's <c>zxdg_toplevel_decoration_v1</c> object
     /// (if any). Switches the compositor back to "client-side
     /// decorations on next commit" per the v1 spec. Also latches the

@@ -19,6 +19,7 @@ using NWayland.Protocols.XdgDecorationUnstableV1;
 using NWayland.Protocols.XdgForeignUnstableV2;
 using NWayland.Protocols.XdgOutputUnstableV1;
 using NWayland.Protocols.XdgShell;
+using NWayland.Protocols.XdgToplevelIconV1;
 
 namespace Avalonia.Wayland.Server.Transient;
 
@@ -61,6 +62,13 @@ class WaylandGlobals
     /// therefore a no-op outside of X11.
     /// </summary>
     public OrgKdeKwinAppmenuManager? AppmenuManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>xdg_toplevel_icon_manager_v1</c>. <c>null</c> means
+    /// per-window icons can't be published and the compositor falls back to the icon from the
+    /// application's desktop-entry file.
+    /// </summary>
+    public XdgToplevelIconManagerV1? ToplevelIconManager { get; }
 
     /// <summary>
     /// Bound when the compositor advertises <c>wp_color_manager_v1</c> and the app opted in via
@@ -178,6 +186,7 @@ class WaylandGlobals
             ? null
             : Bind<ZxdgDecorationManagerV1>(1, 1, null);
         AppmenuManager = Bind<OrgKdeKwinAppmenuManager>(1, 2, null);
+        ToplevelIconManager = Bind<XdgToplevelIconManagerV1>(1, 1, null);
         
         // Seats may have been announced before the data-device manager / text-input
         // manager were bound — InputDispatcher backfills now and constructs the

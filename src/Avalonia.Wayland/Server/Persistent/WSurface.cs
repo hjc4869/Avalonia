@@ -613,6 +613,9 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
     private string? _appmenuServiceName;
     private string? _appmenuObjectPath;
 
+    private WaylandIconData? _iconData;
+    private WaylandToplevelIcon? _icon;
+
     public WXdgTopLevel(WaylandWorker worker, WXdgTopLevelEventSinkProxy eventSink) : base(worker, eventSink)
     {
         _topLevelEventSink = eventSink;
@@ -639,6 +642,7 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
             _xdgTopLevel.SetTitle(_title);
 
         ApplyAppmenuAddress();
+        ApplyIcon(commit: false);
 
         // Re-apply cached min/max if they were ever set on a previous
         // (now-dead) connection. The OnConnected commit below will
@@ -814,6 +818,31 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
     // is specified.
     private sealed class AppmenuListener : OrgKdeKwinAppmenu.Listener;
 
+    public void SetIcon(WaylandIconData? icon)
+    {
+        _iconData = icon;
+        ApplyIcon(commit: true);
+    }
+
+    private void ApplyIcon(bool commit)
+    {
+        if (_iconData == null && _icon == null)
+            return;
+        if (Globals?.ToplevelIconManager is not { } manager || _xdgTopLevel == null
+            || Connection is not { } connection)
+            return;
+
+        var previous = _icon;
+        _icon = _iconData is { } data
+            ? WaylandToplevelIcon.TryCreate(manager, Globals.WlShm, connection, data)
+            : null;
+        manager.SetIcon(_xdgTopLevel, _icon?.Icon!);
+        // set_icon is double-buffered and only takes effect on the next surface commit.
+        if (commit)
+            WlSurface!.Commit();
+        previous?.Dispose();
+    }
+
     internal class TopLevelListener(WXdgTopLevel p) : XdgToplevel.Listener
     {
         protected override void ConfigureBounds(XdgToplevel eventSender, int width, int height) => 
@@ -841,6 +870,8 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
             _appmenu.Dispose();
             _appmenu = null;
         }
+        _icon?.Dispose();
+        _icon = null;
         _decoration?.Destroy();
         _decoration = null;
         _xdgTopLevel?.Destroy();

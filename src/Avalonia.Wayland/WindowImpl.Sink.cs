@@ -48,6 +48,10 @@ partial class WindowImpl
             if (Parent._title != null)
                 _surfaceProxy.SetTitle(Parent._title);
 
+            // The icon lives on the xdg_toplevel, so it has to be republished against the new one.
+            if (Parent._icon != null)
+                _surfaceProxy.SetIcon(Parent._icon);
+
             // org_kde_kwin_appmenu is per-surface, so the exported menu's address has to be
             // re-published against the fresh surface.
             if (Parent._appmenuAddress is { } appmenu)
