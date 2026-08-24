@@ -41,6 +41,7 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
     private ITopLevelNativeMenuExporter? _nativeMenuExporter;
     private bool _nativeMenuExporterQueried;
     private (string ServiceName, string ObjectPath)? _appmenuAddress;
+    private string? _decorationPalette;
 
     public WindowImpl(WaylandWorkerClient client) : base(client)
     {
@@ -265,6 +266,18 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
     {
         _title = title;
         _surfaceProxy?.SetTitle(title);
+    }
+
+    /// <summary>
+    /// Server-side decorations are painted by the compositor, so a light/dark app on a
+    /// dark/light desktop can only match its title bar by telling KWin which colour scheme to
+    /// use. Compositors without the KDE palette protocol simply keep their own colours.
+    /// </summary>
+    public override void SetFrameThemeVariant(PlatformThemeVariant? themeVariant)
+    {
+        base.SetFrameThemeVariant(themeVariant);
+        _decorationPalette = KdeDecorationPalette.For(themeVariant);
+        _surfaceProxy?.SetDecorationPalette(_decorationPalette);
     }
 
     public void SetParent(IWindowImpl? parent)

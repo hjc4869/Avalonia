@@ -57,6 +57,10 @@ partial class WindowImpl
             if (Parent._appmenuAddress is { } appmenu)
                 _surfaceProxy.SetAppmenuAddress(appmenu.ServiceName, appmenu.ObjectPath);
 
+            // Same story for org_kde_kwin_server_decoration_palette.
+            if (Parent._decorationPalette is { } palette)
+                _surfaceProxy.SetDecorationPalette(palette);
+
             // Re-apply cached min/max size constraints after a fresh worker
             // surface is created. null on both sides means SetMinMaxSize was
             // never called (or both bounds are unconstrained) — nothing to push.

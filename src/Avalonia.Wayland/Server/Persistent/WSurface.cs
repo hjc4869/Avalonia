@@ -12,6 +12,7 @@ using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.Plasma.Appmenu;
+using NWayland.Protocols.Plasma.ServerDecorationPalette;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
 using NWayland.Protocols.XdgDecorationUnstableV1;
@@ -613,6 +614,9 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
     private string? _appmenuServiceName;
     private string? _appmenuObjectPath;
 
+    private OrgKdeKwinServerDecorationPalette? _palette;
+    private string? _paletteName;
+
     private WaylandIconData? _iconData;
     private WaylandToplevelIcon? _icon;
 
@@ -642,6 +646,7 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
             _xdgTopLevel.SetTitle(_title);
 
         ApplyAppmenuAddress();
+        ApplyDecorationPalette();
         ApplyIcon(commit: false);
 
         // Re-apply cached min/max if they were ever set on a previous
@@ -818,6 +823,27 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
     // is specified.
     private sealed class AppmenuListener : OrgKdeKwinAppmenu.Listener;
 
+    public void SetDecorationPalette(string palette)
+    {
+        _paletteName = palette;
+        ApplyDecorationPalette();
+    }
+
+    private void ApplyDecorationPalette()
+    {
+        if (_paletteName is not { } palette)
+            return;
+        if (Globals?.DecorationPaletteManager is not { } manager || WlSurface is not { } surface
+            || Connection is not { } connection)
+            return;
+        _palette ??= manager.Create(surface, new PaletteListener(), connection.Queue);
+        _palette.SetPalette(palette);
+    }
+
+    // org_kde_kwin_server_decoration_palette has no events, but NWayland requires a listener
+    // whenever a target queue is specified.
+    private sealed class PaletteListener : OrgKdeKwinServerDecorationPalette.Listener;
+
     public void SetIcon(WaylandIconData? icon)
     {
         _iconData = icon;
@@ -869,6 +895,12 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
             _appmenu.Release();
             _appmenu.Dispose();
             _appmenu = null;
+        }
+        if (_palette != null)
+        {
+            _palette.Release();
+            _palette.Dispose();
+            _palette = null;
         }
         _icon?.Dispose();
         _icon = null;

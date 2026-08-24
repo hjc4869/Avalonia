@@ -78,7 +78,7 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
     public AcrylicPlatformCompensationLevels AcrylicCompensationLevels { get; } = default;
     public void SetTransparencyLevelHint(IReadOnlyList<WindowTransparencyLevel> transparencyLevels) { }
 
-    public async void SetFrameThemeVariant(PlatformThemeVariant? themeVariant)
+    public virtual void SetFrameThemeVariant(PlatformThemeVariant? themeVariant)
     {
         if (themeVariant == null && AvaloniaLocator.Current.GetService<IPlatformSettings>() is DBusPlatformSettings platformSettings)
         {

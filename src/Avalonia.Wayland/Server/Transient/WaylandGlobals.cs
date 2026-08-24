@@ -13,6 +13,7 @@ using NWayland.Protocols.CursorShapeV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
 using NWayland.Protocols.Plasma.Appmenu;
+using NWayland.Protocols.Plasma.ServerDecorationPalette;
 using NWayland.Protocols.TextInputUnstableV3;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -63,6 +64,13 @@ class WaylandGlobals
     /// therefore a no-op outside of X11.
     /// </summary>
     public OrgKdeKwinAppmenuManager? AppmenuManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>org_kde_kwin_server_decoration_palette_manager</c>
+    /// (KWin). Picks the KDE colour scheme a server-side decoration is painted with, which is the
+    /// only way to get a dark title bar on a light Plasma desktop (or the other way round).
+    /// </summary>
+    public OrgKdeKwinServerDecorationPaletteManager? DecorationPaletteManager { get; }
 
     /// <summary>
     /// Bound when the compositor advertises <c>xdg_toplevel_icon_manager_v1</c>. <c>null</c> means
@@ -196,6 +204,7 @@ class WaylandGlobals
             ? null
             : Bind<ZxdgDecorationManagerV1>(1, 1, null);
         AppmenuManager = Bind<OrgKdeKwinAppmenuManager>(1, 2, null);
+        DecorationPaletteManager = Bind<OrgKdeKwinServerDecorationPaletteManager>(1, 1, null);
         ToplevelIconManager = Bind<XdgToplevelIconManagerV1>(1, 1, null);
         
         // Seats may have been announced before the data-device manager / text-input

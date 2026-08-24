@@ -77,6 +77,15 @@ internal interface IWXdgTopLevel : IWXdgShellSurface
     void SetAppmenuAddress(string serviceName, string objectPath);
 
     /// <summary>
+    /// Points KWin at the KDE colour scheme its server-side decoration should be painted with,
+    /// through <c>org_kde_kwin_server_decoration_palette</c>. The value is a KConfig name, in
+    /// practice the absolute path of a <c>.colors</c> file; an empty string resets the window to
+    /// the user's global scheme. Cached by the worker so it survives a compositor reconnect; a
+    /// no-op when the compositor doesn't advertise the protocol.
+    /// </summary>
+    void SetDecorationPalette(string palette);
+
+    /// <summary>
     /// Synchronously creates an xdg-foreign-v2 export of this toplevel; the returned
     /// façade's HandleTask completes asynchronously when the compositor delivers the
     /// handle event. Returns null if the exporter global isn't bound or the toplevel
