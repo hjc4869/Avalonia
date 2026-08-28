@@ -53,7 +53,7 @@ namespace Avalonia.OpenGL.Egl
                 throw new ArgumentException();
 
             _config = EglDisplayUtils.InitializeAndGetConfig(_egl, display, options.GlVersions, options.ProbeConfig,
-                options.ColorBufferFormats);
+                options.ColorBufferFormats, options.UseEglWindowSurfaceColorSpace);
         }
         
         public EglInterface EglInterface => _egl;
@@ -126,8 +126,11 @@ namespace Avalonia.OpenGL.Egl
 
             using (Lock())
             {
+                var attributes = _options.UseEglWindowSurfaceColorSpace
+                    ? EglDisplayUtils.GetWindowSurfaceAttributes(_config.ColorBufferFormat.ColorSpace)
+                    : new[] { EGL_NONE };
                 var s = EglInterface.CreateWindowSurface(Handle, Config, window,
-                    new[] { EGL_NONE, EGL_NONE });
+                    attributes);
                 if (s == IntPtr.Zero)
                     throw OpenGlException.GetFormattedException("eglCreateWindowSurface", EglInterface);
                 return new EglSurface(this, s);

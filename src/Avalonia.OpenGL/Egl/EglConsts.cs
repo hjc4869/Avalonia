@@ -156,7 +156,8 @@ namespace Avalonia.OpenGL.Egl
 //        public const int  EGL_CONDITION_SATISFIED = 0x30F6;
 //        public const int  EGL_NO_SYNC = 0;
 //        public const int  EGL_SYNC_FENCE = 0x30F9;
-//        public const int  EGL_GL_COLORSPACE = 0x309D;
+        // EGL_KHR_gl_colorspace
+        public const int  EGL_GL_COLORSPACE = 0x309D;
 //        public const int  EGL_GL_COLORSPACE_SRGB = 0x3089;
 //        public const int  EGL_GL_COLORSPACE_LINEAR = 0x308A;
 //        public const int  EGL_GL_RENDERBUFFER = 0x30B9;
@@ -177,6 +178,9 @@ namespace Avalonia.OpenGL.Egl
         public const int  EGL_COLOR_COMPONENT_TYPE_EXT = 0x3339;
         public const int  EGL_COLOR_COMPONENT_TYPE_FIXED_EXT = 0x333A;
         public const int  EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT = 0x333B;
+
+        // EGL_EXT_gl_colorspace_scrgb_linear
+        public const int  EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT = 0x3350;
 
         // EGL_KHR_image_base
         public const int  EGL_IMAGE_PRESERVED_KHR = 0x30D2;

@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Avalonia.Platform;
 using static Avalonia.OpenGL.Egl.EglConsts;
 namespace Avalonia.OpenGL.Egl;
 
 internal static class EglDisplayUtils
 {
+    internal const double ScRgbReferenceWhiteNits = 80;
+    internal const double ScRgbMaximumNits = 10000;
+
     public static IntPtr CreateDisplay(EglDisplayCreationOptions options)
     {
         var egl = options.Egl ?? new EglInterface();
@@ -51,7 +55,8 @@ internal static class EglDisplayUtils
 
     public static EglConfigInfo InitializeAndGetConfig(EglInterface egl, IntPtr display,
         IEnumerable<GlVersion>? versions, EglConfigProbeCallback? probeConfig = null,
-        IReadOnlyList<EglColorBufferFormat>? colorBufferFormats = null)
+        IReadOnlyList<EglColorBufferFormat>? colorBufferFormats = null,
+        bool useEglWindowSurfaceColorSpace = false)
     {
         if (!egl.Initialize(display, out _, out _))
             throw OpenGlException.GetFormattedException("eglInitialize", egl);
@@ -125,8 +130,8 @@ internal static class EglDisplayUtils
             });
 
         var formats = colorBufferFormats is { Count: > 0 } ? colorBufferFormats : EglColorBufferFormat.StandardOnly;
-        var supportsFloatFormats =
-            egl.QueryString(display, EGL_EXTENSIONS)?.Contains("EGL_EXT_pixel_format_float") == true;
+        var extensions = egl.QueryString(display, EGL_EXTENSIONS);
+        var supportsFloatFormats = HasExtension(extensions, "EGL_EXT_pixel_format_float");
 
         foreach (var cfg in cfgs)
         {
@@ -135,6 +140,8 @@ internal static class EglDisplayUtils
             foreach (var format in formats)
             {
                 if (format.FloatComponents && !supportsFloatFormats)
+                    continue;
+                if (useEglWindowSurfaceColorSpace && !SupportsWindowSurfaceColorSpace(format.ColorSpace, extensions))
                     continue;
                 foreach (var surfaceType in new[] { EGL_PBUFFER_BIT | EGL_WINDOW_BIT, EGL_WINDOW_BIT })
                 foreach (var stencilSize in new[] { 8, 1, 0 })
@@ -172,6 +179,68 @@ internal static class EglDisplayUtils
 
         throw new OpenGlException("No suitable EGL config was found");
     }
+
+    // EGL_EXT_gl_colorspace_scrgb_linear fixes 1.0 at 80 nits and its representable peak at 10000 nits.
+    internal static PlatformSurfaceColorVolume? CreateScRgbColorVolume(
+        double minimumNits,
+        double maximumNits,
+        double? currentHeadroomRatio,
+        PlatformTransferFunction transfer,
+        double transferExponent = 0)
+    {
+        if (!double.IsFinite(minimumNits) || !double.IsFinite(maximumNits) ||
+            minimumNits < 0 || maximumNits <= 0)
+        {
+            return null;
+        }
+
+        maximumNits = Math.Min(maximumNits, ScRgbMaximumNits);
+        if (currentHeadroomRatio is { } headroomRatio)
+        {
+            if (!double.IsFinite(headroomRatio) || headroomRatio < 1)
+                return null;
+
+            maximumNits = Math.Min(maximumNits, headroomRatio * ScRgbReferenceWhiteNits);
+        }
+
+        if (maximumNits < ScRgbReferenceWhiteNits || minimumNits > maximumNits ||
+            transfer == PlatformTransferFunction.Power &&
+            (!double.IsFinite(transferExponent) || transferExponent <= 0))
+        {
+            return null;
+        }
+
+        if (transfer != PlatformTransferFunction.Power)
+            transferExponent = 0;
+
+        return new PlatformSurfaceColorVolume(
+            new PlatformLuminanceRange(0, ScRgbReferenceWhiteNits),
+            ScRgbReferenceWhiteNits,
+            new PlatformLuminanceRange(minimumNits, maximumNits),
+            transfer,
+            transferExponent,
+            ScRgbReferenceWhiteNits);
+    }
+
+    internal static int[] GetWindowSurfaceAttributes(PlatformColorSpace colorSpace) => colorSpace switch
+    {
+        PlatformColorSpace.ScRgbLinear =>
+            new[] { EGL_GL_COLORSPACE, EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT, EGL_NONE },
+        _ => new[] { EGL_NONE }
+    };
+
+    internal static bool SupportsWindowSurfaceColorSpace(PlatformColorSpace colorSpace, string? extensions) =>
+        colorSpace switch
+        {
+            PlatformColorSpace.Unmanaged => true,
+            PlatformColorSpace.ScRgbLinear =>
+                HasExtension(extensions, "EGL_KHR_gl_colorspace") &&
+                HasExtension(extensions, "EGL_EXT_gl_colorspace_scrgb_linear"),
+            _ => false
+        };
+
+    private static bool HasExtension(string? extensions, string extension) =>
+        extensions?.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(extension, StringComparer.Ordinal) == true;
 
     
 }

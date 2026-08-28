@@ -29,6 +29,12 @@ public class EglDisplayOptions
     /// When null, only the standard 8 bit non color managed config is considered.
     /// </summary>
     public IReadOnlyList<EglColorBufferFormat>? ColorBufferFormats { get; set; }
+
+    /// <summary>
+    /// Whether managed color formats must be supported by EGL window-surface color-space extensions
+    /// and should be passed to <c>eglCreateWindowSurface</c>.
+    /// </summary>
+    public bool UseEglWindowSurfaceColorSpace { get; set; }
 }
 
 public class EglContextOptions
