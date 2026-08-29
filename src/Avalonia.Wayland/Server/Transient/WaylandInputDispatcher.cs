@@ -14,6 +14,10 @@ namespace Avalonia.Wayland.Server.Transient;
 
 partial class WaylandInputDispatcher : IDisposable
 {
+    private const double DipsPerWheelDelta = 50;
+    private const double ContinuousScrollFactor = 2.5;
+    private const double WaylandWheelAxisUnitsPerDetent = 10;
+
     private readonly WaylandGlobals _globals;
     private readonly Dictionary<uint, Seat> _seats = new();
 
@@ -144,6 +148,22 @@ partial class WaylandInputDispatcher : IDisposable
         BTN_EXTRA => RawInputModifiers.XButton2MouseButton,
         _ => RawInputModifiers.None
     };
+
+    internal static double ConvertAxisDelta(double continuous, double discrete, bool hasDiscrete,
+        WlPointer.AxisSourceEnum? source)
+    {
+        if (hasDiscrete)
+            return discrete;
+
+        // ScrollContentPresenter maps one Avalonia wheel unit to 50 DIPs. GTK applies
+        // the same 2.5 factor to finger and continuous surface-unit scrolling.
+        // Wheel axis values conventionally use 10 units per detent when discrete data
+        // isn't available (the same fallback used by Qt Wayland).
+        var unitsPerDelta = source is WlPointer.AxisSourceEnum.Finger or WlPointer.AxisSourceEnum.Continuous
+            ? DipsPerWheelDelta / ContinuousScrollFactor
+            : WaylandWheelAxisUnitsPerDetent;
+        return continuous / unitsPerDelta;
+    }
 
     class Seat : IDisposable
     {
@@ -292,9 +312,10 @@ partial class WaylandInputDispatcher : IDisposable
         //    every scroll source (wheel + touchpad/continuous), regardless of version.
         //
         // For Avalonia (1.0 == one detent), value120/120 is the right unit when present.
-        // For continuous sources (touchpad), there is no value120 and we fall back to the
-        // raw axis value. We accumulate the two streams independently and combine at frame
-        // flush time, preferring v120 per axis when present). This is robust to either event order.
+        // For continuous sources (touchpad), there is no value120 and we normalize the raw
+        // axis distance into Avalonia wheel units. We accumulate the two streams independently
+        // and combine at frame flush time, preferring v120 per axis when present. This is robust
+        // to either event order.
         private bool _frameHasAxis;
         private ulong _frameAxisTimestamp;
         private double _frameAxisRawX;
@@ -303,6 +324,7 @@ partial class WaylandInputDispatcher : IDisposable
         private double _frameV120Y;
         private bool _frameV120SeenX;
         private bool _frameV120SeenY;
+        private WlPointer.AxisSourceEnum? _frameAxisSource;
 
         public PointerHandler(WaylandInputDispatcher dispatcher, Seat seat)
         {
@@ -379,6 +401,7 @@ partial class WaylandInputDispatcher : IDisposable
             _frameV120Y = 0;
             _frameV120SeenX = false;
             _frameV120SeenY = false;
+            _frameAxisSource = null;
         }
 
         public void Dispose()
@@ -461,9 +484,11 @@ partial class WaylandInputDispatcher : IDisposable
                 handler._frameActions.Add(() =>
                 {
                     // Combine v120 (notches) with raw axis (continuous). Per axis, prefer v120
-                    // if any v120 event fired this frame; otherwise fall back to the raw axis.
-                    var deltaX = handler._frameV120SeenX ? handler._frameV120X : handler._frameAxisRawX;
-                    var deltaY = handler._frameV120SeenY ? handler._frameV120Y : handler._frameAxisRawY;
+                    // if any v120 event fired this frame; otherwise normalize the raw axis.
+                    var deltaX = ConvertAxisDelta(handler._frameAxisRawX, handler._frameV120X,
+                        handler._frameV120SeenX, handler._frameAxisSource);
+                    var deltaY = ConvertAxisDelta(handler._frameAxisRawY, handler._frameV120Y,
+                        handler._frameV120SeenY, handler._frameAxisSource);
                     if (deltaX != 0 || deltaY != 0)
                     {
                         // Wayland: positive = scroll down/right. Avalonia: positive Y = scroll up.
@@ -488,6 +513,7 @@ partial class WaylandInputDispatcher : IDisposable
 
             protected override void AxisSource(WlPointer eventSender, WlPointer.AxisSourceEnum axisSource)
             {
+                handler._frameAxisSource = axisSource;
             }
 
             protected override void AxisStop(WlPointer eventSender, uint time, WlPointer.AxisEnum axis)
