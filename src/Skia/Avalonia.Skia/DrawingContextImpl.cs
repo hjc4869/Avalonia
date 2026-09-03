@@ -651,10 +651,23 @@ namespace Avalonia.Skia
                 }
 #pragma warning restore CS0618
 
-                var textBlob = glyphRunImpl.GetTextBlob(effectiveTextOptions, RenderOptions);
-
-                Canvas.DrawText(textBlob, (float)glyphRun.BaselineOrigin.X,
-                    (float)glyphRun.BaselineOrigin.Y, paintWrapper.Paint);
+                // Ganesh packs atlas text colors into 8-bit vertices, which clips scaled scRGB values.
+                if (OperatingSystem.IsWindows() && _colorFormat.ColorSpace == PlatformColorSpace.ScRgbLinear &&
+                    glyphRunImpl.GetTextPath() is { } textPath)
+                {
+                    var restore = Canvas.Save();
+                    Canvas.Translate(
+                        (float)glyphRun.BaselineOrigin.X,
+                        (float)glyphRun.BaselineOrigin.Y);
+                    Canvas.DrawPath(textPath, paintWrapper.Paint);
+                    Canvas.RestoreToCount(restore);
+                }
+                else
+                {
+                    var textBlob = glyphRunImpl.GetTextBlob(effectiveTextOptions, RenderOptions);
+                    Canvas.DrawText(textBlob, (float)glyphRun.BaselineOrigin.X,
+                        (float)glyphRun.BaselineOrigin.Y, paintWrapper.Paint);
+                }
             }
         }
 
