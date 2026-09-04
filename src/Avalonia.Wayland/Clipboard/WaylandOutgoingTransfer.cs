@@ -226,9 +226,12 @@ class WaylandOutgoingTransfer
             {
                 await WaylandClipboardImpl.SerializeForMimeAsync(transfer, mime, stream);
             }
-            catch
+            catch (Exception e)
             {
-                // Stream disposal closes the fd
+                // Stream disposal closes the fd, leaving the requesting client with an empty
+                // paste; logged because that is otherwise indistinguishable from an empty clipboard.
+                Logging.Logger.TryGet(Logging.LogEventLevel.Error, Logging.LogArea.Platform)
+                    ?.Log(this, "Failed to serialize clipboard data for {Mime}: {Exception}", mime, e);
             }
         });
     }
