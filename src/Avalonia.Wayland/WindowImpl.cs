@@ -36,7 +36,12 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
     // This is a limitation of V1 of the protocol that's supported in the wild
     private bool _csdSticky;
     private string? _title;
+    private WaylandIconData? _icon;
     private FallbackStorageProvider? _storageProvider;
+    private ITopLevelNativeMenuExporter? _nativeMenuExporter;
+    private bool _nativeMenuExporterQueried;
+    private (string ServiceName, string ObjectPath)? _appmenuAddress;
+    private string? _decorationPalette;
 
     public WindowImpl(WaylandWorkerClient client) : base(client)
     {
@@ -105,7 +110,38 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
             return _textInputMethod ??= new WaylandTextInputMethod(this);
         if (featureType == typeof(IStorageProvider))
             return _storageProvider ??= new FallbackStorageProvider(BuildStorageFactories());
+        if (featureType == typeof(ITopLevelNativeMenuExporter))
+            return GetNativeMenuExporter();
         return base.TryGetFeature(featureType);
+    }
+
+    /// <summary>
+    /// Wayland has no global menu protocol of its own, so the menu is exported over DBus and the
+    /// window is associated with it through KWin's <c>org_kde_kwin_appmenu</c>. When no shell picks
+    /// the menu up, nothing ever asks for the layout, the exporter stays unexported and the
+    /// framework falls back to an in-window menu.
+    /// </summary>
+    private ITopLevelNativeMenuExporter? GetNativeMenuExporter()
+    {
+        if (!_nativeMenuExporterQueried)
+        {
+            _nativeMenuExporterQueried = true;
+            _nativeMenuExporter = DBusMenuExporter.TryCreateTopLevelNativeMenu();
+            if (_nativeMenuExporter is IDBusMenuAddressProvider { ServiceName: { } serviceName } address)
+            {
+                _appmenuAddress = (serviceName, address.ObjectPath);
+                _surfaceProxy?.SetAppmenuAddress(serviceName, address.ObjectPath);
+            }
+        }
+
+        return _nativeMenuExporter;
+    }
+
+    public override void Dispose()
+    {
+        (_nativeMenuExporter as IDisposable)?.Dispose();
+        _nativeMenuExporter = null;
+        base.Dispose();
     }
 
     private Func<Task<IStorageProvider?>>[] BuildStorageFactories() => new Func<Task<IStorageProvider?>>[]
@@ -232,6 +268,18 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
         _surfaceProxy?.SetTitle(title);
     }
 
+    /// <summary>
+    /// Server-side decorations are painted by the compositor, so a light/dark app on a
+    /// dark/light desktop can only match its title bar by telling KWin which colour scheme to
+    /// use. Compositors without the KDE palette protocol simply keep their own colours.
+    /// </summary>
+    public override void SetFrameThemeVariant(PlatformThemeVariant? themeVariant)
+    {
+        base.SetFrameThemeVariant(themeVariant);
+        _decorationPalette = KdeDecorationPalette.For(themeVariant);
+        _surfaceProxy?.SetDecorationPalette(_decorationPalette);
+    }
+
     public void SetParent(IWindowImpl? parent)
     {
         var parentProxy = (parent as WindowImpl)?._handle?.Proxy;
@@ -272,7 +320,11 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
         ExtendClientAreaToDecorationsChanged?.Invoke(IsClientAreaExtendedToDecorations);
     }
 
-    public void SetIcon(IWindowIconImpl? icon) { }
+    public void SetIcon(IWindowIconImpl? icon)
+    {
+        _icon = WaylandIconData.TryCreate(icon);
+        _surfaceProxy?.SetIcon(_icon);
+    }
     public void ShowTaskbarIcon(bool value) { }
     public void CanResize(bool value) => _canResize = value;
     public void SetCanMinimize(bool value) { }
