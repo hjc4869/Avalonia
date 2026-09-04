@@ -9,8 +9,11 @@ using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland;
 using NWayland.Interop;
 using NWayland.Protocols.ColorManagementV1;
+using NWayland.Protocols.CursorShapeV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
+using NWayland.Protocols.Plasma.Appmenu;
+using NWayland.Protocols.Plasma.ServerDecorationPalette;
 using NWayland.Protocols.TextInputUnstableV3;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -18,6 +21,7 @@ using NWayland.Protocols.XdgDecorationUnstableV1;
 using NWayland.Protocols.XdgForeignUnstableV2;
 using NWayland.Protocols.XdgOutputUnstableV1;
 using NWayland.Protocols.XdgShell;
+using NWayland.Protocols.XdgToplevelIconV1;
 
 namespace Avalonia.Wayland.Server.Transient;
 
@@ -54,11 +58,41 @@ class WaylandGlobals
     public ZxdgDecorationManagerV1? XdgDecorationManager { get; }
 
     /// <summary>
+    /// Bound when the compositor advertises <c>org_kde_kwin_appmenu_manager</c> (KWin). This is the
+    /// only way to associate a toplevel with an exported dbusmenu on Wayland: KDE's
+    /// com.canonical.AppMenu.Registrar translates registrations into X11 window properties and is
+    /// therefore a no-op outside of X11.
+    /// </summary>
+    public OrgKdeKwinAppmenuManager? AppmenuManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>org_kde_kwin_server_decoration_palette_manager</c>
+    /// (KWin). Picks the KDE colour scheme a server-side decoration is painted with, which is the
+    /// only way to get a dark title bar on a light Plasma desktop (or the other way round).
+    /// </summary>
+    public OrgKdeKwinServerDecorationPaletteManager? DecorationPaletteManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>xdg_toplevel_icon_manager_v1</c>. <c>null</c> means
+    /// per-window icons can't be published and the compositor falls back to the icon from the
+    /// application's desktop-entry file.
+    /// </summary>
+    public XdgToplevelIconManagerV1? ToplevelIconManager { get; }
+
+    /// <summary>
     /// Bound when the compositor advertises <c>wp_color_manager_v1</c> and the app opted in via
     /// <see cref="WaylandPlatformOptions.ColorMode"/>. <c>null</c> means surfaces are left untagged
     /// and therefore treated as plain sRGB by the compositor.
     /// </summary>
     public WaylandColorManager? ColorManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>wp_cursor_shape_manager_v1</c>. When present, standard
+    /// cursors are named rather than drawn by us, so the compositor picks the image from the user's
+    /// theme at the right size and scale. <c>null</c> means every cursor goes through the
+    /// locally themed surfaces of <see cref="CursorManager"/>.
+    /// </summary>
+    public WpCursorShapeManagerV1? CursorShapeManager { get; }
 
     public bool HasFractionalScaling => FractionalScaleManager != null && Viewporter != null;
 
@@ -149,6 +183,7 @@ class WaylandGlobals
         WlCompositor = BindRequired<WlCompositor>(4, 6, null);
         XdgWmBase = BindRequired<XdgWmBase>(3, 4, new XdgWmBaseListener());
         CursorManager = new WaylandCursorManager(connection.Display, WlShm, WlCompositor);
+        CursorShapeManager = Bind<WpCursorShapeManagerV1>(1, 2, null);
         DataDeviceManager = Bind<WlDataDeviceManager>(3, 3, null);
         LinuxDmabuf = Bind<ZwpLinuxDmabufV1>(4, 4, null);
         FractionalScaleManager = Bind<WpFractionalScaleManagerV1>(1, 1, null);
@@ -168,6 +203,9 @@ class WaylandGlobals
         XdgDecorationManager = platformOptions.ForceDrawnDecorationsInternal
             ? null
             : Bind<ZxdgDecorationManagerV1>(1, 1, null);
+        AppmenuManager = Bind<OrgKdeKwinAppmenuManager>(1, 2, null);
+        DecorationPaletteManager = Bind<OrgKdeKwinServerDecorationPaletteManager>(1, 1, null);
+        ToplevelIconManager = Bind<XdgToplevelIconManagerV1>(1, 1, null);
         
         // Seats may have been announced before the data-device manager / text-input
         // manager were bound — InputDispatcher backfills now and constructs the

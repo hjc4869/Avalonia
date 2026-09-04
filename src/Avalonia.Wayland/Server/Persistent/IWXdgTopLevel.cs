@@ -50,6 +50,13 @@ internal interface IWXdgTopLevel : IWXdgShellSurface
     void SetTitle(string? title);
 
     /// <summary>
+    /// Sets the toplevel's icon through <c>xdg_toplevel_icon_v1</c>. A <c>null</c> value resets the
+    /// toplevel to its default (desktop-entry) icon. The worker caches the pixel data so it
+    /// survives compositor reconnects; a no-op when the compositor doesn't advertise the protocol.
+    /// </summary>
+    void SetIcon(WaylandIconData? icon);
+
+    /// <summary>
     /// Tear down the worker's <c>zxdg_toplevel_decoration_v1</c> object
     /// (if any). Switches the compositor back to "client-side
     /// decorations on next commit" per the v1 spec. Also latches the
@@ -60,6 +67,24 @@ internal interface IWXdgTopLevel : IWXdgShellSurface
     /// committed a buffer). Idempotent.
     /// </summary>
     void DestroyDecoration();
+
+    /// <summary>
+    /// Publishes the DBus address of this toplevel's exported dbusmenu through
+    /// <c>org_kde_kwin_appmenu</c>, which is how KWin associates a window with a global menu on
+    /// Wayland. Cached by the worker so it's re-sent after a compositor reconnect; a no-op when the
+    /// compositor doesn't advertise the protocol.
+    /// </summary>
+    void SetAppmenuAddress(string serviceName, string objectPath);
+
+    /// <summary>
+    /// Points KWin at the KDE colour scheme its server-side decoration should be painted with,
+    /// through <c>org_kde_kwin_server_decoration_palette</c>. The value is a KConfig name, in
+    /// practice the absolute path of a <c>.colors</c> file; an empty string resets the window to
+    /// the user's global scheme. Cached by the worker so it survives a compositor reconnect; a
+    /// no-op when the compositor doesn't advertise the protocol.
+    /// </summary>
+    void SetDecorationPalette(string palette);
+
     /// <summary>
     /// Synchronously creates an xdg-foreign-v2 export of this toplevel; the returned
     /// façade's HandleTask completes asynchronously when the compositor delivers the
