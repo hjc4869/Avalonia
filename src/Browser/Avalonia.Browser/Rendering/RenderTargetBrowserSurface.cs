@@ -19,7 +19,8 @@ internal class RenderTargetBrowserSurface : BrowserSurface
     private static InitParams CreateCompositor(JSObject jsSurface)
     {
         var targetId = jsSurface.GetPropertyAsInt32("targetId");
-        var graphics = new BrowserPlatformGraphics(targetId);
+        var colorVolume = AvaloniaLocator.Current.GetService<IScreenImpl>() as IPlatformSurfaceColorVolumeFeature;
+        var graphics = new BrowserPlatformGraphics(targetId, colorVolume);
         var compositor = new Compositor(BrowserSharedRenderLoop.RenderLoop.Value, graphics);
 
         return new(compositor, graphics);
@@ -52,16 +53,18 @@ internal class RenderTargetBrowserSurface : BrowserSurface
     class BrowserPlatformGraphics : IPlatformGraphicsWithFeatures, IPlatformGraphicsReadyStateFeature
     {
         private readonly int _targetId;
+        private readonly IPlatformSurfaceColorVolumeFeature? _colorVolume;
         private BrowserRenderTarget? _target;
 
-        public BrowserPlatformGraphics(int targetId)
+        public BrowserPlatformGraphics(int targetId, IPlatformSurfaceColorVolumeFeature? colorVolume)
         {
-            
+            _colorVolume = colorVolume;
             _targetId = targetId;
         }
 
         public BrowserRenderTarget? Target =>
-            _target ??= BrowserRenderTarget.GetRenderTarget(_targetId, () => CanvasSize);
+            _target ??= BrowserRenderTarget.GetRenderTarget(_targetId, () => CanvasSize,
+                () => _colorVolume?.PreferredColorVolume);
 
         public bool IsReady => Target != null && CanvasSize.Size != default;
         public bool UsesContexts => Target!.PlatformGraphicsContext != null;
@@ -96,7 +99,8 @@ internal class RenderTargetBrowserSurface : BrowserSurface
 
     public static RenderTargetBrowserSurface Create(JSObject container, IReadOnlyList<BrowserRenderingMode> modes, int topLevelId)
     {
-        var js = CanvasHelper.CreateRenderTargetSurface(container, modes.Select(m => (int)m).ToArray(), topLevelId, RenderWorker.WorkerThreadId);
+        var preferHdr = AvaloniaLocator.Current.GetService<BrowserPlatformOptions>()?.PreferHdr ?? false;
+        var js = CanvasHelper.CreateRenderTargetSurface(container, modes.Select(m => (int)m).ToArray(), topLevelId, RenderWorker.WorkerThreadId, preferHdr);
         return new RenderTargetBrowserSurface(js);
     }
 }

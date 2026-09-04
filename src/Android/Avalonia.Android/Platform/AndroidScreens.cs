@@ -93,6 +93,8 @@ internal sealed class AndroidScreens : ScreensBase<Display, AndroidScreen>, IDis
     private readonly DisplayManager? _displayService;
     private readonly DisplayListener? _listener;
 
+    internal event Action<int>? DisplaysChanged;
+
     public AndroidScreens(Context context) : base(new DisplayComparer())
     {
         _context = context;
@@ -139,11 +141,17 @@ internal sealed class AndroidScreens : ScreensBase<Display, AndroidScreen>, IDis
         _listener?.Dispose();
     }
 
+    private void OnDisplaysChanged(int displayId)
+    {
+        OnChanged();
+        DisplaysChanged?.Invoke(displayId);
+    }
+
     private class DisplayListener(AndroidScreens screens) : Java.Lang.Object, DisplayManager.IDisplayListener
     {
-        public void OnDisplayAdded(int displayId) => screens.OnChanged();
-        public void OnDisplayChanged(int displayId) => screens.OnChanged();
-        public void OnDisplayRemoved(int displayId) => screens.OnChanged();
+        public void OnDisplayAdded(int displayId) => screens.OnDisplaysChanged(displayId);
+        public void OnDisplayChanged(int displayId) => screens.OnDisplaysChanged(displayId);
+        public void OnDisplayRemoved(int displayId) => screens.OnDisplaysChanged(displayId);
     }
 
     private class DisplayComparer : IEqualityComparer<Display>

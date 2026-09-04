@@ -23,6 +23,8 @@ namespace Avalonia.Skia
 
         public PlatformRenderTargetState State => _surface.State;
 
+        public PlatformSurfaceColorFormat ColorFormat => _surface.ColorFormat;
+
         class GlGpuSession : ISkiaGpuRenderSession
         {
             private readonly GRBackendRenderTarget _backendRenderTarget;
@@ -55,6 +57,8 @@ namespace Avalonia.Skia
             public GRContext GrContext { get; }
             public SKSurface SkSurface => _surface;
             public double ScaleFactor => _glSession.Scaling;
+            public PlatformSurfaceColorFormat ColorFormat => _glSession.ColorFormat;
+            public PlatformSurfaceColorVolume? PreferredColorVolume => _glSession.PreferredColorVolume;
         }
         
         public ISkiaGpuRenderSession BeginRenderingSession(IRenderTarget.RenderTargetSceneInfo sceneInfo)
@@ -69,7 +73,9 @@ namespace Avalonia.Skia
                 gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, out var fb);
 
                 var size = glSession.Size;
-                var colorType = SKColorType.Rgba8888;
+                var colorFormat = glSession.ColorFormat;
+                var colorType = colorFormat.ToSkColorType(SKColorType.Rgba8888);
+                var colorSpace = colorFormat.ToSkColorSpace(glSession.PreferredColorVolume);
                 var scaling = glSession.Scaling;
                 if (size.Width <= 0 || size.Height <= 0 || scaling < 0)
                 {
@@ -91,7 +97,7 @@ namespace Avalonia.Skia
                     var renderTarget = new GRBackendRenderTarget(size.Width, size.Height, samples, disp.StencilSize, glInfo);
                     var surface = SKSurface.Create(_grContext, renderTarget,
                         glSession.IsYFlipped ? GRSurfaceOrigin.TopLeft : GRSurfaceOrigin.BottomLeft,
-                        colorType, _surfaceProperties);
+                        colorType, colorSpace, _surfaceProperties);
 
                     success = true;
 

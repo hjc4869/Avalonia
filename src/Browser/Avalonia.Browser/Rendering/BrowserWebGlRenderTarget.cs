@@ -14,12 +14,19 @@ namespace Avalonia.Browser.Rendering;
 partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
 {
     private readonly Func<(PixelSize Size, double Scaling)> _sizeGetter;
+    private readonly Func<PlatformSurfaceColorVolume?> _colorVolumeGetter;
     private readonly GLInfo _glInfo;
+    private readonly PlatformSurfaceColorFormat _colorFormat;
     public IGlContext GlContext { get; }
 
-    public BrowserWebGlRenderTarget(JSObject js, Func<(PixelSize, double)> sizeGetter) : base(js)
+    public BrowserWebGlRenderTarget(JSObject js, Func<(PixelSize, double)> sizeGetter,
+        Func<PlatformSurfaceColorVolume?> colorVolumeGetter) : base(js)
     {
         _sizeGetter = sizeGetter;
+        _colorVolumeGetter = colorVolumeGetter;
+        _colorFormat = js.GetPropertyAsBoolean("isHdr")
+            ? new(PlatformPixelEncoding.RgbaF16, PlatformColorSpace.ScRgbLinear)
+            : default;
         _glInfo = new GLInfo(
             js.GetPropertyAsInt32("contextHandle")!,
             (uint)js.GetPropertyAsInt32("fboId"),
@@ -36,12 +43,15 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
     {
         private IDisposable? _restoreContext;
 
-        public GlSession(IGlContext context, PixelSize size, double scaling, IDisposable restoreContext)
+        public GlSession(IGlContext context, PixelSize size, double scaling, IDisposable restoreContext,
+            PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume)
         {
             _restoreContext = restoreContext;
             Context = context;
             Size = size;
             Scaling = scaling;
+            ColorFormat = colorFormat;
+            PreferredColorVolume = preferredColorVolume;
         }
 
         public void Dispose()
@@ -55,6 +65,8 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
         // This should technically be delivered via CompositionTarget.Scaling anyway, why do we still have this property
         public double Scaling { get; }
         public bool IsYFlipped => false;
+        public PlatformSurfaceColorFormat ColorFormat { get; }
+        public PlatformSurfaceColorVolume? PreferredColorVolume { get; }
     }
     
     class GlSurface : IGlPlatformSurfaceRenderTarget
@@ -67,6 +79,7 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
         }
 
         public bool IsCorrupted => false;
+        public PlatformSurfaceColorFormat ColorFormat => _target._colorFormat;
 
         public void Dispose()
         {
@@ -79,7 +92,8 @@ partial class BrowserWebGlRenderTarget : BrowserRenderTarget, IGlPlatformSurface
             _target.UpdateSize(s.Size);
             var restoreContext = _target.GlContext.EnsureCurrent();
             _target.GlContext.GlInterface.BindFramebuffer(GlConsts.GL_FRAMEBUFFER, (int)_target._glInfo.FboId);
-            return new GlSession(_target.GlContext, s.Size, s.Scaling, restoreContext);
+            return new GlSession(_target.GlContext, s.Size, s.Scaling, restoreContext, ColorFormat,
+                ColorFormat.IsExtendedRange ? _target._colorVolumeGetter() : null);
         }
     }
 

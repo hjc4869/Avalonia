@@ -18,6 +18,96 @@ runs on a dedicated thread that also serves as our render thread. Yes, Wayland w
 
 NOTE: crash recovery is not yet supported when using an externally created wl_display.
 
+## Color management (wide color gamut / HDR)
+
+Off by default. `WaylandPlatformOptions.ColorMode` opts in:
+
+- `WideColorGamut` — 10 bit (fp16 fallback) surface, Display P3 primaries with a gamma 2.2 transfer
+  function. Existing controls keep their appearance because Skia color converts their sRGB colors
+  into the wider space; blending stays gamma-encoded so gradients and antialiasing are unaffected.
+- `ExtendedLinear` — fp16 scRGB surface (sRGB primaries, extended linear transfer). Channel values
+  below 0 and above 1 are meaningful, so it's the HDR-capable mode, but blending happens in linear
+  light and therefore differs from Avalonia's historical sRGB-encoded blending.
+
+Both sides have to agree before anything changes, and the negotiation happens once, in
+`WaylandGlobals`:
+
+1. Bind `wp_color_manager_v1` and read the compositor's supported features / transfer functions /
+   primaries (`WaylandColorManager.SelectColorSpace`).
+2. Only then create the EGL display, passing high bit depth `EglColorBufferFormat` candidates with
+   the plain 8 bit config last as a fallback.
+3. Create the image description for whatever EGL actually handed us, and tag every `wl_surface`
+   with it via `wp_color_management_surface_v1.set_image_description`.
+
+**Invariant: what we render and what we tag the surface with must always match.** An untagged
+surface is interpreted as sRGB, so rendering P3 pixels into one shifts every color on screen. If
+the compositor refuses the image description, `WaylandEglWsiPlatformGraphics.DowngradeToUnmanagedColorSpace`
+puts Skia back to plain sRGB; the buffer keeps whatever extra precision EGL gave us, which is
+always safe. Any failure along the way silently degrades to today's 8 bit sRGB behaviour.
+
+Known limitation: the software `WaylandFramebuffer` fallback always renders 8 bit sRGB, so if a
+tagged surface ever falls back to it, colors will be off until the surface is re-tagged.
+
+The extended linear description also sets its luminances explicitly, because the protocol's default
+primary color volume minimum is 0.2 cd/m² and linear light has no such floor: 0 is no emission at
+all. Left at the default, the compositor has a black level to map out of the surface and it arrives
+as lifted shadows, which is the one thing an extended range surface is supposed to reproduce exactly.
+Only the minimum is changed; the maximum and reference white stay at scRGB's 80 cd/m², so signal 1.0
+still means the reference white.
+
+### Peak luminance / reference white
+
+Every `WSurface` additionally owns a `wp_color_management_surface_feedback_v1`
+(`WaylandColorVolumeFeedback`). It answers "how bright is the display this window is currently on",
+which is per-surface state: the compositor re-evaluates it when the window moves between outputs and
+announces that with `preferred_changed`.
+
+The chain is `get_preferred` → `wp_image_description_v1.ready` → `get_information` →
+`wp_image_description_info_v1.done`. Only `done` publishes; `luminances` provides the primary range
+plus the reference white and `target_luminance` the actually displayable range, whose maximum is the
+peak. Both minimums are scaled by 10000 in the protocol, the other values are plain cd/m². The
+result surfaces as `PlatformSurfaceColorVolume` through the `IPlatformSurfaceColorVolumeFeature`
+top level feature and, snapshotted per frame, on `ISkiaSharpApiLease.PreferredColorVolume`.
+
+The same round trip carries `tf_named`/`tf_power`, reported as `PlatformSurfaceColorVolume.Transfer`.
+That is the curve the compositor encodes this surface's content with on the way to the display, and
+it is the only way to know it: the protocol leaves an untagged surface "compositor implementation
+defined", and its `srgb` name was ambiguous enough that version 2 renamed the piece-wise curve to
+`compound_power_2_4`. A named power law, which is what both KWin and Mutter report for an SDR output,
+is reported as `Power` with the exponent rather than under a name of its own, so a client that has to
+put a signal into linear light for an extended range surface can undo exactly what will be re-applied
+instead of assuming a curve.
+
+Anything less than a complete answer reports `null` rather than a guess: no `wp_color_manager_v1`
+(i.e. `ColorMode.Standard`), a query still in flight, `failed`, or an ICC-only description, which
+carries no luminance events at all.
+
+`SurfaceNitsPerUnit` is filled in by `WaylandColorManager` rather than by the feedback object,
+because only it knows what the surface was tagged with. A parametric description is relative, so the
+compositor re-anchors its reference white to the display's and numeric 1.0 arrives as diffuse white;
+the Windows-scRGB fallback instead pins 1.0 to 80 cd/m² whatever the display is set to, and content
+has to be scaled up to compensate. The DWM does the same on an HDR display, which is why the value
+exists at all rather than being assumed to be the reference white.
+
+### NWayland pitfalls hit here
+
+- Passing an `IWlTargetQueue` **without** a listener throws. Interfaces with no events
+  (`wp_image_description_creator_params_v1`, `wp_color_management_surface_v1`) still need an empty
+  listener subclass.
+- Passing an explicit target queue to a **destructor request** (`wp_image_description_creator_params_v1.create`)
+  makes NWayland route the call through a proxy wrapper and then destroy the wrapper, which aborts
+  inside libwayland with `Tried to destroy wrapper with wl_proxy_destroy()`. Pass a `null` queue for
+  those and let the new object inherit its parent's queue.
+- `create` is a destructor: the creator must not be disposed or destroyed afterwards.
+
+### Choosing an extended linear description
+
+`create_windows_scrgb` pins signal 1.0 to 80 cd/m², not to the reference white, which makes ordinary
+SDR content visibly dimmer (measured: white composited at 167/255 instead of 255/255). The
+parametric description with the default sRGB luminances puts the reference white at 1.0, matching
+`EGL_EXT_gl_colorspace_scrgb_linear`, so it is preferred and `create_windows_scrgb` is only a
+fallback.
+
 ## Protocol docs
 
 Do NOT assume things about Wayland protocols. Those could be rather non-intuitive. Always check what the protocol says

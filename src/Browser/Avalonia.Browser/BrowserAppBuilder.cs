@@ -29,6 +29,13 @@ public record BrowserPlatformOptions
     };
 
     /// <summary>
+    /// Requests extended-range linear sRGB output with WebGL2, falling back to SDR when unavailable.
+    /// Requires experimental HDR canvas APIs in Chromium and an HDR-capable display for HDR presentation.
+    /// </summary>
+    [Unstable("Depends on experimental browser APIs.")]
+    public bool PreferHdr { get; set; }
+
+    /// <summary>
     /// Defines paths where avalonia modules and service locator should be resolved.
     /// If null, default path resolved depending on the backend (browser or blazor) is used.
     /// </summary>

@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Avalonia.Platform;
 using static Avalonia.OpenGL.Egl.EglConsts;
 namespace Avalonia.OpenGL.Egl;
 
 internal static class EglDisplayUtils
 {
+    internal const double ScRgbReferenceWhiteNits = 80;
+    internal const double ScRgbMaximumNits = 10000;
+
     public static IntPtr CreateDisplay(EglDisplayCreationOptions options)
     {
         var egl = options.Egl ?? new EglInterface();
@@ -50,7 +54,9 @@ internal static class EglDisplayUtils
     }
 
     public static EglConfigInfo InitializeAndGetConfig(EglInterface egl, IntPtr display,
-        IEnumerable<GlVersion>? versions, EglConfigProbeCallback? probeConfig = null)
+        IEnumerable<GlVersion>? versions, EglConfigProbeCallback? probeConfig = null,
+        IReadOnlyList<EglColorBufferFormat>? colorBufferFormats = null,
+        bool useEglWindowSurfaceColorSpace = false)
     {
         if (!egl.Initialize(display, out _, out _))
             throw OpenGlException.GetFormattedException("eglInitialize", egl);
@@ -123,38 +129,118 @@ internal static class EglDisplayUtils
                 }
             });
 
+        var formats = colorBufferFormats is { Count: > 0 } ? colorBufferFormats : EglColorBufferFormat.StandardOnly;
+        var extensions = egl.QueryString(display, EGL_EXTENSIONS);
+        var supportsFloatFormats = HasExtension(extensions, "EGL_EXT_pixel_format_float");
+
         foreach (var cfg in cfgs)
         {
             if (!egl.BindApi(cfg.Api))
                 continue;
-            foreach (var surfaceType in new[] { EGL_PBUFFER_BIT | EGL_WINDOW_BIT, EGL_WINDOW_BIT })
-            foreach (var stencilSize in new[] { 8, 1, 0 })
-            foreach (var depthSize in new[] { 8, 1, 0 })
+            foreach (var format in formats)
             {
-                var attribs = new[]
-                {
-                    EGL_SURFACE_TYPE, surfaceType,
-                    EGL_RENDERABLE_TYPE, cfg.RenderableTypeBit,
-                    EGL_RED_SIZE, 8,
-                    EGL_GREEN_SIZE, 8,
-                    EGL_BLUE_SIZE, 8,
-                    EGL_ALPHA_SIZE, 8,
-                    EGL_STENCIL_SIZE, stencilSize,
-                    EGL_DEPTH_SIZE, depthSize,
-                    EGL_NONE
-                };
-                if (ChooseConfigWithProbe(egl, display, attribs, probeConfig) is not { } config)
+                if (format.FloatComponents && !supportsFloatFormats)
                     continue;
+                if (useEglWindowSurfaceColorSpace && !SupportsWindowSurfaceColorSpace(format.ColorSpace, extensions))
+                    continue;
+                foreach (var surfaceType in new[] { EGL_PBUFFER_BIT | EGL_WINDOW_BIT, EGL_WINDOW_BIT })
+                foreach (var stencilSize in new[] { 8, 1, 0 })
+                foreach (var depthSize in new[] { 8, 1, 0 })
+                {
+                    var attribs = new List<int>
+                    {
+                        EGL_SURFACE_TYPE, surfaceType,
+                        EGL_RENDERABLE_TYPE, cfg.RenderableTypeBit,
+                        EGL_RED_SIZE, format.ColorBits,
+                        EGL_GREEN_SIZE, format.ColorBits,
+                        EGL_BLUE_SIZE, format.ColorBits,
+                        EGL_ALPHA_SIZE, format.AlphaBits,
+                        EGL_STENCIL_SIZE, stencilSize,
+                        EGL_DEPTH_SIZE, depthSize
+                    };
+                    if (format.FloatComponents)
+                    {
+                        attribs.Add(EGL_COLOR_COMPONENT_TYPE_EXT);
+                        attribs.Add(EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT);
+                    }
 
-                egl.GetConfigAttrib(display, config, EGL_SAMPLES, out var sampleCount);
-                egl.GetConfigAttrib(display, config, EGL_STENCIL_SIZE, out var returnedStencilSize);
-                return new EglConfigInfo(config, cfg.Version, surfaceType, cfg.Attributes, sampleCount,
-                    returnedStencilSize, cfg.Api);
+                    attribs.Add(EGL_NONE);
+
+                    if (ChooseConfigWithProbe(egl, display, attribs.ToArray(), probeConfig) is not { } config)
+                        continue;
+
+                    egl.GetConfigAttrib(display, config, EGL_SAMPLES, out var sampleCount);
+                    egl.GetConfigAttrib(display, config, EGL_STENCIL_SIZE, out var returnedStencilSize);
+                    return new EglConfigInfo(config, cfg.Version, surfaceType, cfg.Attributes, sampleCount,
+                        returnedStencilSize, cfg.Api, format);
+                }
             }
         }
 
         throw new OpenGlException("No suitable EGL config was found");
     }
+
+    // EGL_EXT_gl_colorspace_scrgb_linear fixes 1.0 at 80 nits and its representable peak at 10000 nits.
+    internal static PlatformSurfaceColorVolume? CreateScRgbColorVolume(
+        double minimumNits,
+        double maximumNits,
+        double? currentHeadroomRatio,
+        PlatformTransferFunction transfer,
+        double transferExponent = 0)
+    {
+        if (!double.IsFinite(minimumNits) || !double.IsFinite(maximumNits) ||
+            minimumNits < 0 || maximumNits <= 0)
+        {
+            return null;
+        }
+
+        maximumNits = Math.Min(maximumNits, ScRgbMaximumNits);
+        if (currentHeadroomRatio is { } headroomRatio)
+        {
+            if (!double.IsFinite(headroomRatio) || headroomRatio < 1)
+                return null;
+
+            maximumNits = Math.Min(maximumNits, headroomRatio * ScRgbReferenceWhiteNits);
+        }
+
+        if (maximumNits < ScRgbReferenceWhiteNits || minimumNits > maximumNits ||
+            transfer == PlatformTransferFunction.Power &&
+            (!double.IsFinite(transferExponent) || transferExponent <= 0))
+        {
+            return null;
+        }
+
+        if (transfer != PlatformTransferFunction.Power)
+            transferExponent = 0;
+
+        return new PlatformSurfaceColorVolume(
+            new PlatformLuminanceRange(0, ScRgbReferenceWhiteNits),
+            ScRgbReferenceWhiteNits,
+            new PlatformLuminanceRange(minimumNits, maximumNits),
+            transfer,
+            transferExponent,
+            ScRgbReferenceWhiteNits);
+    }
+
+    internal static int[] GetWindowSurfaceAttributes(PlatformColorSpace colorSpace) => colorSpace switch
+    {
+        PlatformColorSpace.ScRgbLinear =>
+            new[] { EGL_GL_COLORSPACE, EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT, EGL_NONE },
+        _ => new[] { EGL_NONE }
+    };
+
+    internal static bool SupportsWindowSurfaceColorSpace(PlatformColorSpace colorSpace, string? extensions) =>
+        colorSpace switch
+        {
+            PlatformColorSpace.Unmanaged => true,
+            PlatformColorSpace.ScRgbLinear =>
+                HasExtension(extensions, "EGL_KHR_gl_colorspace") &&
+                HasExtension(extensions, "EGL_EXT_gl_colorspace_scrgb_linear"),
+            _ => false
+        };
+
+    private static bool HasExtension(string? extensions, string extension) =>
+        extensions?.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(extension, StringComparer.Ordinal) == true;
 
     
 }
@@ -168,9 +254,10 @@ internal class EglConfigInfo
     public int SampleCount { get; }
     public int StencilSize { get; }
     public int Api { get; }
+    public EglColorBufferFormat ColorBufferFormat { get; }
 
     public EglConfigInfo(IntPtr config, GlVersion version, int surfaceType, int[] attributes, int sampleCount,
-        int stencilSize, int api)
+        int stencilSize, int api, EglColorBufferFormat colorBufferFormat)
     {
         Config = config;
         Version = version;
@@ -179,5 +266,6 @@ internal class EglConfigInfo
         SampleCount = sampleCount;
         StencilSize = stencilSize;
         Api = api;
+        ColorBufferFormat = colorBufferFormat;
     }
 }

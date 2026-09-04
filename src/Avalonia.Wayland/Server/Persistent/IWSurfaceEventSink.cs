@@ -51,6 +51,13 @@ internal interface IWSurfaceEventSink
     /// to pick "the" screen for the window.
     /// </summary>
     void OnSurfaceOutputsChanged(System.Collections.Generic.IReadOnlyList<object> outputIds);
+
+    /// <summary>
+    /// Pushed from the worker whenever the color volume the compositor prefers for this surface
+    /// changes (typically because the window moved to a different output), and on disconnect.
+    /// <c>null</c> means the compositor can't tell us.
+    /// </summary>
+    void OnPreferredColorVolumeChanged(Avalonia.Platform.PlatformSurfaceColorVolume? colorVolume);
 }
 
 /// <summary>

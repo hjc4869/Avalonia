@@ -75,7 +75,14 @@ internal class DirectCompositedWindowRenderTarget : IDirect3D11TextureRenderTarg
         _context = context;
         _shared = shared;
         _window = window;
+        ColorFormat = Win32SurfaceColorFormat.Negotiated(context);
     }
+
+    public PlatformSurfaceColorFormat ColorFormat { get; }
+
+    public PlatformSurfaceColorVolume? PreferredColorVolume =>
+        (_window.WindowInfo as EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume)
+        ?.PreferredColorVolume;
 
     [MemberNotNull(nameof(_surface))]
     private void CreateSurface(in IRenderTarget.RenderTargetSceneInfo sceneInfo)
@@ -89,7 +96,12 @@ internal class DirectCompositedWindowRenderTarget : IDirect3D11TextureRenderTarg
             DXGI_ALPHA_MODE.DXGI_ALPHA_MODE_PREMULTIPLIED :
             DXGI_ALPHA_MODE.DXGI_ALPHA_MODE_IGNORE;
 
-        _surface = surfaceFactory.CreateVirtualSurface((uint)surfaceSize.Width, (uint)surfaceSize.Height, DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode);
+        // The DWM treats FP16 surfaces as scRGB, which is what gives us wide gamut and HDR.
+        var format = ColorFormat.Encoding == PlatformPixelEncoding.RgbaF16
+            ? DXGI_FORMAT.DXGI_FORMAT_R16G16B16A16_FLOAT
+            : DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM;
+
+        _surface = surfaceFactory.CreateVirtualSurface((uint)surfaceSize.Width, (uint)surfaceSize.Height, format, alphaMode);
 
         _isSurfaceSupportTransparency = isTransparency;
         _size = surfaceSize;

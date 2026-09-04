@@ -18,13 +18,22 @@ namespace Avalonia.Skia
         private SKSurface? _surface;
 
         private static readonly bool[] TrueFalse = new[] { true, false };
-        public FboSkiaSurface(GlSkiaGpu gpu, GRContext grContext, IGlContext glContext, PixelSize pixelSize, GRSurfaceOrigin surfaceOrigin)
+        public FboSkiaSurface(GlSkiaGpu gpu, GRContext grContext, IGlContext glContext, PixelSize pixelSize,
+            GRSurfaceOrigin surfaceOrigin, PlatformSurfaceColorFormat colorFormat = default,
+            PlatformSurfaceColorVolume? preferredColorVolume = null)
         {
             _gpu = gpu;
             _grContext = grContext;
             _glContext = glContext;
             _pixelSize = pixelSize;
-            var InternalFormat = glContext.Version.Type == GlProfileType.OpenGLES ? GL_RGBA : GL_RGBA8;
+            var isGles = glContext.Version.Type == GlProfileType.OpenGLES;
+            var colorType = colorFormat.ToSkColorType(SKColorType.Rgba8888);
+            var (internalFormat, type) = colorFormat.Encoding switch
+            {
+                PlatformPixelEncoding.RgbaF16 => (GL_RGBA16F, GL_HALF_FLOAT),
+                PlatformPixelEncoding.Rgba1010102 => (GL_RGB10_A2, GL_UNSIGNED_INT_2_10_10_10_REV),
+                _ => (isGles ? GL_RGBA : GL_RGBA8, GL_UNSIGNED_BYTE)
+            };
             var gl = glContext.GlInterface;
             
             // Save old bindings
@@ -41,8 +50,8 @@ namespace Avalonia.Skia
             _texture = gl.GenTexture();
             gl.BindTexture(GL_TEXTURE_2D, _texture);
             gl.TexImage2D(GL_TEXTURE_2D, 0,
-                InternalFormat, pixelSize.Width, pixelSize.Height,
-                0, GL_RGBA, GL_UNSIGNED_BYTE, IntPtr.Zero);
+                internalFormat, pixelSize.Width, pixelSize.Height,
+                0, GL_RGBA, type, IntPtr.Zero);
             gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, _texture, 0);
@@ -90,9 +99,10 @@ namespace Avalonia.Skia
             }
 
             using var target = new GRBackendRenderTarget(pixelSize.Width, pixelSize.Height, 0, 8,
-                new GRGlFramebufferInfo((uint)_fbo, SKColorType.Rgba8888.ToGlSizedFormat()));
+                new GRGlFramebufferInfo((uint)_fbo, colorType.ToGlSizedFormat()));
             using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
-            _surface = SKSurface.Create(_grContext, target, surfaceOrigin, SKColorType.Rgba8888, properties);
+            _surface = SKSurface.Create(_grContext, target, surfaceOrigin, colorType,
+                colorFormat.ToSkColorSpace(preferredColorVolume), properties);
             CanBlit = gl.IsBlitFramebufferAvailable;
         }
         

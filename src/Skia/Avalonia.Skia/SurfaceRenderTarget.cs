@@ -19,6 +19,8 @@ namespace Avalonia.Skia
         private readonly bool _disableLcdRendering;
         private readonly GRContext? _grContext;
         private readonly ISkiaGpu? _gpu;
+        private readonly PlatformSurfaceColorFormat _colorFormat;
+        private readonly PlatformSurfaceColorVolume? _preferredColorVolume;
 
         private class SkiaSurfaceWrapper : ISkiaSurface
         {
@@ -53,6 +55,8 @@ namespace Avalonia.Skia
             _disableLcdRendering = createInfo.DisableTextLcdRendering;
             _grContext = createInfo.GrContext;
             _gpu = createInfo.Gpu;
+            _colorFormat = createInfo.ColorFormat;
+            _preferredColorVolume = createInfo.PreferredColorVolume;
 
             ISkiaSurface? surface = null;
 
@@ -61,7 +65,8 @@ namespace Avalonia.Skia
 
             if (surface is null)
             {
-                if (CreateSurface(createInfo.GrContext, PixelSize.Width, PixelSize.Height, createInfo.Format)
+                if (CreateSurface(createInfo.GrContext, PixelSize.Width, PixelSize.Height, createInfo.Format,
+                    createInfo.ColorFormat, createInfo.PreferredColorVolume)
                     is { } skSurface)
                 {
                     surface = new SkiaSurfaceWrapper(skSurface);
@@ -75,7 +80,7 @@ namespace Avalonia.Skia
             _canvas = canvas;
         }
 
-        public RenderTargetProperties Properties => default;
+        public RenderTargetProperties Properties => new() { ColorFormat = _colorFormat };
 
         /// <summary>
         /// Create backing Skia surface.
@@ -83,11 +88,14 @@ namespace Avalonia.Skia
         /// <param name="gpu">GPU.</param>
         /// <param name="width">Width.</param>
         /// <param name="height">Height.</param>
-        /// <param name="format">Format.</param>
+        /// <param name="format">Pixel format.</param>
+        /// <param name="colorFormat">Surface color format.</param>
+        /// <param name="preferredColorVolume">Preferred color volume for the target surface.</param>
         /// <returns></returns>
-        private static SKSurface? CreateSurface(GRContext? gpu, int width, int height, PixelFormat? format)
+        private static SKSurface? CreateSurface(GRContext? gpu, int width, int height, PixelFormat? format,
+            PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume)
         {
-            var imageInfo = MakeImageInfo(width, height, format);
+            var imageInfo = MakeImageInfo(width, height, format, colorFormat, preferredColorVolume);
             if (gpu != null)
                 return SKSurface.Create(gpu, false, imageInfo, new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal));
             return SKSurface.Create(imageInfo, new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal));
@@ -114,6 +122,8 @@ namespace Avalonia.Skia
                 DisableSubpixelTextRendering = _disableLcdRendering,
                 GrContext = _grContext,
                 Gpu = _gpu,
+                ColorFormat = _colorFormat,
+                PreferredColorVolume = _preferredColorVolume,
             };
 
             return new DrawingContextImpl(createInfo, Disposable.Create(() => Version++));
@@ -176,13 +186,17 @@ namespace Avalonia.Skia
         /// </summary>
         /// <param name="width">Width.</param>
         /// <param name="height">Height.</param>
-        /// <param name="format">Format.</param>
+        /// <param name="format">Pixel format.</param>
+        /// <param name="colorFormat">Surface color format.</param>
+        /// <param name="preferredColorVolume">Preferred color volume for the target surface.</param>
         /// <returns></returns>
-        private static SKImageInfo MakeImageInfo(int width, int height, PixelFormat? format)
+        private static SKImageInfo MakeImageInfo(int width, int height, PixelFormat? format,
+            PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume)
         {
-            var colorType = PixelFormatHelper.ResolveColorType(format);
+            var colorType = colorFormat.ToSkColorType(PixelFormatHelper.ResolveColorType(format));
 
-            return new SKImageInfo(Math.Max(width, 1), Math.Max(height, 1), colorType, SKAlphaType.Premul);
+            return new SKImageInfo(Math.Max(width, 1), Math.Max(height, 1), colorType, SKAlphaType.Premul,
+                colorFormat.ToSkColorSpace(preferredColorVolume));
         }
 
         /// <summary>
@@ -209,6 +223,18 @@ namespace Avalonia.Skia
             /// Pixel format of a render target.
             /// </summary>
             public PixelFormat? Format;
+
+            /// <summary>
+            /// Pixel encoding and color space of a render target. Defaults to the legacy,
+            /// non color managed 8 bit sRGB format.
+            /// </summary>
+            public PlatformSurfaceColorFormat ColorFormat;
+
+            /// <summary>
+            /// Color volume the platform preferred for the top level surface this render target
+            /// ultimately ends up in, or null when it can't be determined.
+            /// </summary>
+            public PlatformSurfaceColorVolume? PreferredColorVolume;
 
             /// <summary>
             /// Render text without Lcd rendering.

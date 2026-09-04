@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using Avalonia.Logging;
+using Avalonia.OpenGL.Egl;
 using Avalonia.Platform;
 using Avalonia.Wayland.Screens;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland;
 using NWayland.Interop;
+using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
 using NWayland.Protocols.TextInputUnstableV3;
@@ -49,6 +52,13 @@ class WaylandGlobals
     /// every toplevel (no SSD negotiation will be attempted).
     /// </summary>
     public ZxdgDecorationManagerV1? XdgDecorationManager { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>wp_color_manager_v1</c> and the app opted in via
+    /// <see cref="WaylandPlatformOptions.ColorMode"/>. <c>null</c> means surfaces are left untagged
+    /// and therefore treated as plain sRGB by the compositor.
+    /// </summary>
+    public WaylandColorManager? ColorManager { get; }
 
     public bool HasFractionalScaling => FractionalScaleManager != null && Viewporter != null;
 
@@ -173,16 +183,66 @@ class WaylandGlobals
         // quirks. Opt in to the dmabuf path (we own the allocator) by setting
         // UseDmabufSwapchain = true.
         var useDmabuf = platformOptions.UseDmabufSwapchain ?? false;
+
+        // Wide gamut / extended range rendering needs agreement from both sides: the compositor has
+        // to accept an image description for the color space, and the driver has to hand us a
+        // matching high bit depth EGL config. Ask the compositor first so we only request exotic
+        // configs we can actually describe.
+        var colorBufferFormats = EglColorBufferFormat.StandardOnly;
+        if (platformOptions.ColorMode != WaylandColorMode.Standard
+            && _knownGlobals.TryGetValue(WpColorManagerV1.ProxyType.Interface.Name, out var colorManagerGlobal))
+        {
+            ColorManager = WaylandColorManager.TryCreate(connection, Registry, colorManagerGlobal.name,
+                colorManagerGlobal.version);
+            var desired = ColorManager?.SelectColorSpace(platformOptions.ColorMode) ?? PlatformColorSpace.Unmanaged;
+            if (desired != PlatformColorSpace.Unmanaged)
+                colorBufferFormats = BuildColorBufferFormats(platformOptions.ColorMode, desired);
+        }
+
         WaylandPlatformGraphics.IWaylandGraphics? gpu = null;
         if (useDmabuf && LinuxDmabuf != null)
             gpu = WaylandEglDmaBufPlatformGraphics.TryCreate(connection, this, platformOptions.GlProfiles);
         else
-            gpu = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles);
+            gpu = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles, colorBufferFormats);
+
+        // Only tag surfaces once we know which config EGL actually gave us: describing a surface as
+        // wide gamut while rendering plain sRGB into it would shift every color on screen.
+        var wsiGraphics = gpu as WaylandEglWsiPlatformGraphics;
+        var negotiated = wsiGraphics?.ColorFormat ?? default;
+        if (ColorManager != null && !ColorManager.TryCreateImageDescription(negotiated.ColorSpace))
+        {
+            // The buffer keeps whatever precision EGL gave us, but Skia goes back to writing plain
+            // sRGB into it so an untagged surface still looks right.
+            wsiGraphics?.DowngradeToUnmanagedColorSpace();
+            if (negotiated.IsColorManaged)
+                Logger.TryGet(LogEventLevel.Warning, "Wayland")?.Log(this,
+                    "Advanced color was requested but the compositor rejected the image description; " +
+                    "falling back to sRGB");
+        }
 
         worker.PlatformGraphics.Initialize(gpu);
 
         // TODO: sanity checks
     }
+
+    private static IReadOnlyList<EglColorBufferFormat> BuildColorBufferFormats(WaylandColorMode mode,
+        PlatformColorSpace colorSpace) => mode switch
+    {
+        // scRGB is only meaningful with a float encoding that can hold values outside of [0, 1].
+        WaylandColorMode.ExtendedLinear =>
+        [
+            EglColorBufferFormat.Float16(colorSpace),
+            EglColorBufferFormat.Standard
+        ],
+        // 10 bit is plenty for a gamma-encoded wide gamut surface and costs half the bandwidth of
+        // fp16, but not every driver exposes it, so fp16 is the second choice.
+        _ =>
+        [
+            EglColorBufferFormat.Rgb10A2(colorSpace),
+            EglColorBufferFormat.Float16(colorSpace),
+            EglColorBufferFormat.Standard
+        ]
+    };
 
     public WaylandConnection Connection { get; }
     public WaylandWorker Worker { get; }
@@ -192,6 +252,7 @@ class WaylandGlobals
     public void Dispose()
     {
         InputDispatcher.Dispose();
+        ColorManager?.Dispose();
         Worker.PlatformGraphics.Reset();
     }
 }

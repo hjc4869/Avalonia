@@ -1,7 +1,7 @@
 import { JsExports } from "./jsExports";
 
 type SingleScreen = Screen & { window: Window; availLeft: number; availTop: number };
-type ScreenDetailedEx = ScreenDetailed & { availLeft: number; availTop: number };
+type ScreenDetailedEx = ScreenDetailed & { availLeft: number; availTop: number; hdrHeadroom?: number };
 type BrowserScreen = ScreenDetailedEx | SingleScreen;
 enum ScreenOrientation {
     None,
@@ -13,28 +13,64 @@ enum ScreenOrientation {
 
 export class ScreenHelper {
     static detailedScreens?: ScreenDetails;
+    private static subscribedDetails?: ScreenDetails;
+    private static subscribedScreens: ScreenDetailed[] = [];
+    private static window?: Window;
+    private static permissionStatus?: PermissionStatus;
 
     private static raiseOnChanged() {
-        JsExports.DomHelper.ScreensChanged();
+        const screen = ScreenHelper.detailedScreens?.currentScreen;
+        JsExports.DomHelper.ScreensChanged(screen ? ScreenHelper.getHdrHeadroom(screen as ScreenDetailedEx) : Number.NaN);
+    }
+
+    private static onScreensChanged() {
+        if (ScreenHelper.window) {
+            ScreenHelper.subscribeOnChanged(ScreenHelper.window);
+        }
+        ScreenHelper.raiseOnChanged();
     }
 
     public static async checkPermissions(globalThis: Window): Promise<void> {
-        // If previous session already granted "window-management" permissions, just re-request details, before they are used.
-        const { state } = await globalThis.navigator.permissions.query({ name: "window-management" } as any);
-        if (state === "granted") {
-            await this.requestDetailedScreens(globalThis);
+        try {
+            this.permissionStatus = await globalThis.navigator.permissions.query({ name: "window-management" } as any);
+            const update = async () => {
+                if (this.permissionStatus?.state === "granted") {
+                    try {
+                        await this.requestDetailedScreens(globalThis);
+                        return;
+                    } catch {
+                    }
+                }
+                this.detailedScreens = undefined;
+                this.subscribeOnChanged(globalThis);
+                this.raiseOnChanged();
+            };
+            this.permissionStatus.addEventListener("change", update);
+            await update();
+        } catch {
+            this.raiseOnChanged();
         }
     }
 
     public static subscribeOnChanged(globalThis: Window) {
+        this.window = globalThis;
+        this.subscribedDetails?.removeEventListener("screenschange", this.onScreensChanged);
+        this.subscribedDetails?.removeEventListener("currentscreenchange", this.raiseOnChanged);
+        for (const screen of this.subscribedScreens) {
+            screen.removeEventListener("change", this.raiseOnChanged);
+            screen.removeEventListener("hdrheadroomchange", this.raiseOnChanged);
+        }
+        this.subscribedDetails = this.detailedScreens;
+        this.subscribedScreens = this.detailedScreens ? [...this.detailedScreens.screens] : [];
+
         if (this.detailedScreens) {
             globalThis.screen.removeEventListener("change", this.raiseOnChanged);
-            this.detailedScreens.addEventListener("screenschange", this.raiseOnChanged);
+            this.detailedScreens.addEventListener("screenschange", this.onScreensChanged);
+            this.detailedScreens.addEventListener("currentscreenchange", this.raiseOnChanged);
 
-            // When any screen was added, we re-subscribe on all of them to keep it simpler.
-            // Just like in C#, it's safer to re-subscribe if handler is the same function - it will trigger it once.
-            for (const screen of this.detailedScreens.screens) {
+            for (const screen of this.subscribedScreens) {
                 screen.addEventListener("change", this.raiseOnChanged);
+                screen.addEventListener("hdrheadroomchange", this.raiseOnChanged);
             }
         } else {
             globalThis.screen.addEventListener("change", this.raiseOnChanged);
@@ -67,6 +103,13 @@ export class ScreenHelper {
 
     static getDisplayName(screen: BrowserScreen) {
         return (screen as ScreenDetailed)?.label;
+    }
+
+    static getHdrHeadroom(screen: BrowserScreen): number {
+        const headroom = (screen as ScreenDetailedEx).hdrHeadroom;
+        return typeof headroom === "number" && Number.isFinite(headroom) && headroom >= 0
+            ? headroom
+            : Number.NaN;
     }
 
     static getScaling(screen: BrowserScreen) {
