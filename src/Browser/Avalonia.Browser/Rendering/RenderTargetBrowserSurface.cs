@@ -16,16 +16,17 @@ internal class RenderTargetBrowserSurface : BrowserSurface
 
     private record InitParams(Compositor Compositor, BrowserPlatformGraphics Graphics);
 
-    private static InitParams CreateCompositor(JSObject jsSurface)
+    private static InitParams CreateCompositor(JSObject jsSurface, Action<bool> reportHdr)
     {
         var targetId = jsSurface.GetPropertyAsInt32("targetId");
-        var graphics = new BrowserPlatformGraphics(targetId);
+        var colorVolume = AvaloniaLocator.Current.GetService<IScreenImpl>() as IPlatformSurfaceColorVolumeFeature;
+        var graphics = new BrowserPlatformGraphics(targetId, colorVolume, reportHdr);
         var compositor = new Compositor(BrowserSharedRenderLoop.RenderLoop.Value, graphics);
 
         return new(compositor, graphics);
     }
 
-    public RenderTargetBrowserSurface(JSObject jsSurface) : this(jsSurface, CreateCompositor(jsSurface))
+    public RenderTargetBrowserSurface(JSObject jsSurface, Action<bool> reportHdr) : this(jsSurface, CreateCompositor(jsSurface, reportHdr))
     {
         
     }
@@ -52,16 +53,31 @@ internal class RenderTargetBrowserSurface : BrowserSurface
     class BrowserPlatformGraphics : IPlatformGraphicsWithFeatures, IPlatformGraphicsReadyStateFeature
     {
         private readonly int _targetId;
+        private readonly IPlatformSurfaceColorVolumeFeature? _colorVolume;
+        private readonly Action<bool> _reportHdr;
         private BrowserRenderTarget? _target;
 
-        public BrowserPlatformGraphics(int targetId)
+        public BrowserPlatformGraphics(int targetId, IPlatformSurfaceColorVolumeFeature? colorVolume, Action<bool> reportHdr)
         {
-            
+            _colorVolume = colorVolume;
             _targetId = targetId;
+            _reportHdr = reportHdr;
         }
 
-        public BrowserRenderTarget? Target =>
-            _target ??= BrowserRenderTarget.GetRenderTarget(_targetId, () => CanvasSize);
+        public BrowserRenderTarget? Target
+        {
+            get
+            {
+                if (_target is null)
+                {
+                    _target = BrowserRenderTarget.GetRenderTarget(_targetId, () => CanvasSize,
+                        () => _colorVolume?.PreferredColorVolume);
+                    if (_target is { } target)
+                        Threading.Dispatcher.UIThread.Post(() => _reportHdr(target is BrowserWebGlRenderTarget { IsHdr: true }));
+                }
+                return _target;
+            }
+        }
 
         public bool IsReady => Target != null && CanvasSize.Size != default;
         public bool UsesContexts => Target!.PlatformGraphicsContext != null;
@@ -94,9 +110,11 @@ internal class RenderTargetBrowserSurface : BrowserSurface
         base.Dispose();
     }
 
-    public static RenderTargetBrowserSurface Create(JSObject container, IReadOnlyList<BrowserRenderingMode> modes, int topLevelId)
+    public static RenderTargetBrowserSurface Create(JSObject container, IReadOnlyList<BrowserRenderingMode> modes, int topLevelId,
+        Action<bool> reportHdr)
     {
-        var js = CanvasHelper.CreateRenderTargetSurface(container, modes.Select(m => (int)m).ToArray(), topLevelId, RenderWorker.WorkerThreadId);
-        return new RenderTargetBrowserSurface(js);
+        var preferHdr = AvaloniaLocator.Current.GetService<BrowserPlatformOptions>()?.PreferHdr ?? false;
+        var js = CanvasHelper.CreateRenderTargetSurface(container, modes.Select(m => (int)m).ToArray(), topLevelId, RenderWorker.WorkerThreadId, preferHdr);
+        return new RenderTargetBrowserSurface(js, reportHdr);
     }
 }

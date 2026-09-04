@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using Avalonia.Logging;
+using Avalonia.OpenGL.Egl;
 using Avalonia.Platform;
 using Avalonia.Wayland.Screens;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland;
 using NWayland.Interop;
+using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
 using NWayland.Protocols.TextInputUnstableV3;
@@ -50,6 +53,13 @@ class WaylandGlobals
     /// </summary>
     public ZxdgDecorationManagerV1? XdgDecorationManager { get; }
     public string? AppId { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>wp_color_manager_v1</c> and the app opted in via
+    /// <see cref="WaylandPlatformOptions.ColorMode"/>. <c>null</c> means surfaces are left untagged
+    /// and therefore treated as plain sRGB by the compositor.
+    /// </summary>
+    public WaylandColorManager? ColorManager { get; }
 
     public bool HasFractionalScaling => FractionalScaleManager != null && Viewporter != null;
 
@@ -175,16 +185,91 @@ class WaylandGlobals
         // quirks. Opt in to the dmabuf path (we own the allocator) by setting
         // UseDmabufSwapchain = true.
         var useDmabuf = platformOptions.UseDmabufSwapchain ?? false;
+
+        var hdr = platformOptions.HdrPresentationPreferences is not null ||
+                  platformOptions.ColorMode == WaylandColorMode.ExtendedLinear;
+        if ((hdr || platformOptions.ColorMode != WaylandColorMode.Standard)
+            && _knownGlobals.TryGetValue(WpColorManagerV1.ProxyType.Interface.Name, out var colorManagerGlobal))
+        {
+            ColorManager = WaylandColorManager.TryCreate(connection, Registry, colorManagerGlobal.name,
+                colorManagerGlobal.version);
+        }
+
         WaylandPlatformGraphics.IWaylandGraphics? gpu = null;
         if (useDmabuf && LinuxDmabuf != null)
+        {
             gpu = WaylandEglDmaBufPlatformGraphics.TryCreate(connection, this, platformOptions.GlProfiles);
+        }
         else
-            gpu = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles);
+        {
+            if (hdr && ColorManager is { } manager)
+            {
+                foreach (var candidate in platformOptions.HdrPresentationPreferences ?? WaylandColorManager.DefaultHdrPreferences)
+                {
+                    if (candidate == WaylandHdrPresentationMode.Sdr)
+                        break;
+                    if (!manager.TrySelectHdrPresentation(candidate, out var desired))
+                    {
+                        Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this,
+                            "HDR candidate {0} is not supported by the compositor", candidate);
+                        continue;
+                    }
+                    var graphics = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles,
+                        BuildColorBufferFormats(WaylandColorMode.ExtendedLinear, desired));
+                    if (graphics?.ColorFormat.ColorSpace == desired && manager.TryCreateImageDescription(desired))
+                    {
+                        gpu = graphics;
+                        Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this,
+                            "Selected HDR presentation {0}, native format {1}", candidate, graphics.ColorFormat);
+                        break;
+                    }
+                    graphics?.Dispose();
+                    manager.DestroyImageDescription();
+                    Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this,
+                        "HDR candidate {0} failed format or image-description negotiation", candidate);
+                }
+            }
+
+            if (gpu is null)
+            {
+                ColorManager?.DestroyImageDescription();
+                var desired = !hdr ? ColorManager?.SelectColorSpace(platformOptions.ColorMode) ?? PlatformColorSpace.Unmanaged
+                    : PlatformColorSpace.Unmanaged;
+                var formats = desired == PlatformColorSpace.Unmanaged ? EglColorBufferFormat.StandardOnly
+                    : BuildColorBufferFormats(platformOptions.ColorMode, desired);
+                var graphics = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles, formats);
+                if (graphics is not null && ColorManager is not null &&
+                    !ColorManager.TryCreateImageDescription(graphics.ColorFormat.ColorSpace))
+                    graphics.DowngradeToUnmanagedColorSpace();
+                gpu = graphics;
+                if (hdr)
+                    Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this, "Selected SDR presentation fallback");
+            }
+        }
 
         worker.PlatformGraphics.Initialize(gpu);
 
         // TODO: sanity checks
     }
+
+    private static IReadOnlyList<EglColorBufferFormat> BuildColorBufferFormats(WaylandColorMode mode,
+        PlatformColorSpace colorSpace) => mode switch
+    {
+        // scRGB is only meaningful with a float encoding that can hold values outside of [0, 1].
+        WaylandColorMode.ExtendedLinear when colorSpace == PlatformColorSpace.ScRgbLinear =>
+        [
+            EglColorBufferFormat.Float16(colorSpace),
+            EglColorBufferFormat.Standard
+        ],
+        // 10 bit is plenty for a gamma-encoded wide gamut surface and costs half the bandwidth of
+        // fp16, but not every driver exposes it, so fp16 is the second choice.
+        _ =>
+        [
+            EglColorBufferFormat.Rgb10A2(colorSpace),
+            EglColorBufferFormat.Float16(colorSpace),
+            EglColorBufferFormat.Standard
+        ]
+    };
 
     public WaylandConnection Connection { get; }
     public WaylandWorker Worker { get; }
@@ -194,6 +279,7 @@ class WaylandGlobals
     public void Dispose()
     {
         InputDispatcher.Dispose();
+        ColorManager?.Dispose();
         Worker.PlatformGraphics.Reset();
     }
 }

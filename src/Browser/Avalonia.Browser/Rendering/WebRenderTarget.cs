@@ -21,14 +21,15 @@ abstract partial class BrowserRenderTarget(JSObject js)
     [JSImport("WebRenderTarget.setSize", AvaloniaModule.MainModuleName)]
     private static partial void SetJsSize(JSObject target, int w, int h);
 
-    public static BrowserRenderTarget? GetRenderTarget(int id, Func<(PixelSize, double)> sizeGetter)
+    public static BrowserRenderTarget? GetRenderTarget(int id, Func<(PixelSize, double)> sizeGetter,
+        Func<PlatformSurfaceColorVolume?> colorVolumeGetter)
     {
         var js = GetJsRenderTarget(id);
         if (js == null)
             return null;
         var type = js.GetPropertyAsString("renderTargetType");
         if (type == "webgl")
-            return new BrowserWebGlRenderTarget(js, sizeGetter);
+            return new BrowserWebGlRenderTarget(js, sizeGetter, colorVolumeGetter);
         if (type == "software")
             return new BrowserSoftwareRenderTarget(js, sizeGetter);
         throw new NotSupportedException(type);

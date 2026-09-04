@@ -10,7 +10,9 @@
 #include "clipboard.h"
 
 TopLevelImpl::~TopLevelImpl() {
+    [View onClosed];
     View = nullptr;
+    currentRenderTarget = nullptr;
 }
 
 TopLevelImpl::TopLevelImpl(IAvnTopLevelEvents *events) {
@@ -121,7 +123,9 @@ HRESULT TopLevelImpl::CreateSoftwareRenderTarget(IAvnSoftwareRenderTarget **ppv)
 
     auto target = [[IOSurfaceRenderTarget alloc] initWithOpenGlContext: nil];
     *ppv = [target createSoftwareRenderTarget];
+    currentRenderTarget = target;
     [View setRenderTarget: target];
+    UpdateColorInfo();
     return S_OK;
 }
 
@@ -136,11 +140,13 @@ HRESULT TopLevelImpl::CreateGlRenderTarget(IAvnGlContext* glContext, IAvnGlSurfa
 
     auto target = [[IOSurfaceRenderTarget alloc] initWithOpenGlContext: glContext];
     *ppv = [target createSurfaceRenderTarget];
+    currentRenderTarget = target;
     [View setRenderTarget: target];
+    UpdateColorInfo();
     return S_OK;
 }
 
-HRESULT TopLevelImpl::CreateMetalRenderTarget(IAvnMetalDevice* device, IAvnMetalRenderTarget **ppv) {
+HRESULT TopLevelImpl::CreateMetalRenderTarget(IAvnMetalDevice* device, bool extendedLinear, IAvnMetalRenderTarget **ppv) {
     START_COM_CALL;
 
     if(![NSThread isMainThread])
@@ -149,10 +155,63 @@ HRESULT TopLevelImpl::CreateMetalRenderTarget(IAvnMetalDevice* device, IAvnMetal
     if (View == NULL)
         return E_FAIL;
 
-    auto target = [[MetalRenderTarget alloc] initWithDevice: device];
+    auto target = [[MetalRenderTarget alloc] initWithDevice: device extendedLinear: extendedLinear];
+    currentRenderTarget = target;
+    [target setHdrContent: _hasHdrContent];
     [View setRenderTarget: target];
+    UpdateColorInfo();
     [target getRenderTarget: ppv];
     return S_OK;
+}
+
+HRESULT TopLevelImpl::GetColorInfo(AvnSurfaceColorInfo* ret) {
+    START_COM_CALL;
+    if (ret == nullptr)
+        return E_POINTER;
+    *ret = _colorInfo;
+    return S_OK;
+}
+
+HRESULT TopLevelImpl::SetHdrContent(bool hasHdrContent) {
+    START_COM_ARP_CALL;
+    if (![NSThread isMainThread])
+        return COR_E_INVALIDOPERATION;
+    _hasHdrContent = hasHdrContent;
+    if ([currentRenderTarget isKindOfClass:[MetalRenderTarget class]])
+        [(MetalRenderTarget*)currentRenderTarget setHdrContent: hasHdrContent];
+    UpdateColorInfo();
+    return S_OK;
+}
+
+void TopLevelImpl::UpdateColorInfo() {
+    AvnSurfaceColorInfo info = {kAvnBgra8888, 1, 1};
+    if ([currentRenderTarget isKindOfClass:[MetalRenderTarget class]])
+    {
+        auto target = (MetalRenderTarget*)currentRenderTarget;
+        info.PixelFormat = [target pixelFormat];
+        if (info.PixelFormat == kAvnRgbaF16)
+        {
+            info.Headroom = _hasHdrContent ? 0 : 1;
+            info.MaximumHeadroom = 0;
+            if (@available(macOS 10.15, *))
+            {
+                auto screen = View.window.screen;
+                if (screen != nil)
+                {
+                    if (_hasHdrContent)
+                        info.Headroom = screen.maximumExtendedDynamicRangeColorComponentValue;
+                    info.MaximumHeadroom = screen.maximumPotentialExtendedDynamicRangeColorComponentValue;
+                }
+            }
+        }
+        [target setColorInfo: info];
+    }
+    if (info.PixelFormat != _colorInfo.PixelFormat || info.Headroom != _colorInfo.Headroom ||
+        info.MaximumHeadroom != _colorInfo.MaximumHeadroom)
+    {
+        _colorInfo = info;
+        TopLevelEvents->ColorVolumeChanged(info);
+    }
 }
 
 HRESULT TopLevelImpl::CreateNativeControlHost(IAvnNativeControlHost **retOut) {

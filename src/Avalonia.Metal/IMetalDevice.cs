@@ -23,6 +23,9 @@ public interface IMetalPlatformSurface : IPlatformRenderSurface
 public interface IMetalPlatformSurfaceRenderTarget : IDisposable, IPlatformRenderSurfaceRenderTarget
 {
     IMetalPlatformSurfaceRenderingSession BeginRendering();
+
+    /// <summary>The actual negotiated color format of the render target.</summary>
+    PlatformSurfaceColorFormat ColorFormat => default;
 }
 
 [PrivateApi]
@@ -32,4 +35,10 @@ public interface IMetalPlatformSurfaceRenderingSession : IDisposable
     PixelSize Size { get; }
     double Scaling { get; }
     bool IsYFlipped { get; }
+
+    /// <summary>The actual pixel encoding and color space of the drawable.</summary>
+    PlatformSurfaceColorFormat ColorFormat => default;
+
+    /// <summary>The color-volume snapshot captured when this session began.</summary>
+    PlatformSurfaceColorVolume? PreferredColorVolume => null;
 }

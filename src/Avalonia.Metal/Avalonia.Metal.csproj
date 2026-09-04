@@ -9,6 +9,12 @@
     <ProjectReference Include="..\Avalonia.Controls\Avalonia.Controls.csproj" />
   </ItemGroup>
 
+  <ItemGroup Label="InternalsVisibleTo">
+    <InternalsVisibleTo Include="Avalonia.Native, PublicKey=$(AvaloniaPublicKey)" />
+    <InternalsVisibleTo Include="Avalonia.iOS, PublicKey=$(AvaloniaPublicKey)" />
+    <InternalsVisibleTo Include="Avalonia.Skia.UnitTests, PublicKey=$(AvaloniaPublicKey)" />
+  </ItemGroup>
+
   <Import Project="..\..\build\DevAnalyzers.props" />
   <Import Project="..\..\build\TrimmingEnable.props" />
   <Import Project="..\..\build\NullableEnable.props" />
