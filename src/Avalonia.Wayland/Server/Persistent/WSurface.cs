@@ -9,6 +9,7 @@ using Avalonia.Platform.Surfaces;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Transient;
 using Avalonia.Wayland.Server.Transient.Rendering;
+using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -25,6 +26,11 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     public WlSurface? WlSurface { get; private set; }
     protected WpFractionalScaleV1? FractionalScale { get; private set; }
     protected WpViewport? Viewport { get; private set; }
+    private WpColorManagementSurfaceV1? _colorSurface;
+    private WaylandColorVolumeFeedback? _colorVolumeFeedback;
+    private bool _hasHdrContent;
+    private PlatformHdrContentMetadata? _hdrContentMetadata;
+    private WpImageDescriptionV1? _contentImageDescription;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -116,6 +122,31 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
 
     public virtual void ResetTextInput() => TextInputV3?.Reset(this);
 
+    public void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata)
+    {
+        metadata = PlatformHdrContentMetadata.Normalize(hasHdrContent, metadata);
+        if (_hasHdrContent == hasHdrContent && _hdrContentMetadata == metadata)
+            return;
+        _hasHdrContent = hasHdrContent;
+        _hdrContentMetadata = metadata;
+        if (_colorSurface == null)
+            return;
+        ApplyHdrContent();
+        if (CanCommitOutOfBand)
+            WlSurface?.Commit();
+        Worker.WakeupRenderLoop();
+    }
+
+    private void ApplyHdrContent()
+    {
+        if (_colorSurface is null || Globals?.ColorManager is not { } manager)
+            return;
+        var previous = _contentImageDescription;
+        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, _hdrContentMetadata);
+        previous?.Destroy();
+        previous?.Dispose();
+    }
+
     public void SetHitTestVisible(bool value)
     {
         if (_hitTestVisible == value)
@@ -188,10 +219,40 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             Viewport = globals.Viewporter!.GetViewport(WlSurface);
         }
 
-        // Re-apply the cached input region on (re)connect. It's double-buffered
-        // state, promoted by the next commit — which happens before the surface
-        // can receive any input.
-        ApplyInputRegion();
+        _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
+        if (_colorSurface is not null)
+        {
+            ApplyHdrContent();
+            _colorVolumeFeedback = globals.ColorManager?.TryTrackColorVolume(WlSurface, SetPreferredColorVolume);
+        }
+
+    // Re-apply the cached input region on (re)connect. It's double-buffered
+    // state, promoted by the next commit — which happens before the surface
+    // can receive any input.
+    ApplyInputRegion();
+    }
+
+    /// <summary>
+    /// The color volume the compositor currently prefers for this surface, or <c>null</c> when it
+    /// can't be determined. Read on the Wayland thread when a render session begins.
+    /// </summary>
+    internal PlatformSurfaceColorVolume? PreferredColorVolume { get; private set; }
+
+    private void SetPreferredColorVolume(PlatformSurfaceColorVolume? volume)
+    {
+        if (PreferredColorVolume == volume)
+            return;
+        PreferredColorVolume = volume;
+        // The next frame has to be rendered against the new luminances.
+        Worker.WakeupRenderLoop();
+        OnPreferredColorVolumeChanged(volume);
+    }
+
+    /// <summary>
+    /// Called on the Wayland thread when the preferred color volume changes.
+    /// </summary>
+    protected virtual void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume)
+    {
     }
 
     private IPlatformRenderSurface[]? _renderSurfaces;
@@ -379,6 +440,22 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             FractionalScale.Dispose();
             FractionalScale = null;
         }
+        // color-management-v1 has the same ordering requirement.
+        if (_colorVolumeFeedback != null)
+        {
+            _colorVolumeFeedback.Dispose();
+            _colorVolumeFeedback = null;
+        }
+        SetPreferredColorVolume(null);
+        if (_colorSurface != null)
+        {
+            _colorSurface.Destroy();
+            _colorSurface.Dispose();
+            _colorSurface = null;
+        }
+        _contentImageDescription?.Destroy();
+        _contentImageDescription?.Dispose();
+        _contentImageDescription = null;
         WlSurface?.Destroy();
         WlSurface = null;
         Globals = null;
@@ -451,6 +528,9 @@ class WXdgShellSurface : WSurface, IWXdgShellSurface
     }
 
     protected override void OnScaleChanged(double scale) => EventSink.OnScaleChanged(scale);
+
+    protected override void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume) =>
+        EventSink.OnPreferredColorVolumeChanged(volume);
 
     protected override void OnOutputsChanged()
     {

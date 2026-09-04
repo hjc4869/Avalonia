@@ -458,7 +458,15 @@ enum AvnPixelFormat
 {
     kAvnRgb565,
     kAvnRgba8888,
-    kAvnBgra8888
+    kAvnBgra8888,
+    kAvnRgbaF16
+}
+
+struct AvnSurfaceColorInfo
+{
+    AvnPixelFormat PixelFormat;
+    double Headroom;
+    double MaximumHeadroom;
 }
 
 struct AvnFramebuffer
@@ -746,7 +754,7 @@ interface IAvnTopLevel : IUnknown
      HRESULT SetCursor(IAvnCursor* cursor);
      HRESULT CreateGlRenderTarget(IAvnGlContext* context, IAvnGlSurfaceRenderTarget** ret);
      HRESULT CreateSoftwareRenderTarget(IAvnSoftwareRenderTarget** ret);
-     HRESULT CreateMetalRenderTarget(IAvnMetalDevice* device, IAvnMetalRenderTarget** ret);
+    HRESULT CreateMetalRenderTarget(IAvnMetalDevice* device, bool extendedLinear, IAvnMetalRenderTarget** ret);
      
      HRESULT ObtainNSViewHandle([intptr]void** retOut);
      HRESULT ObtainNSViewHandleRetained([intptr]void** retOut);
@@ -764,6 +772,9 @@ interface IAvnTopLevel : IUnknown
              IAvnClipboardDataSource* source,
              IAvnDndResultCallback* callback,
              [intptr]void* sourceHandle);
+
+         HRESULT GetColorInfo(AvnSurfaceColorInfo* ret);
+         HRESULT SetHdrContent(bool hasHdrContent);
 }
 
 [uuid(e5aca675-02b7-4129-aa79-d6e417210bda), cpp-virtual-inherits]
@@ -843,6 +854,8 @@ interface IAvnTopLevelEvents : IUnknown
     AvnDragDropEffects DragEvent(AvnDragEventType type, AvnPoint position,
                                          AvnInputModifiers modifiers, AvnDragDropEffects effects,
                                          IAvnClipboard* clipboard, [intptr]void* dataTransferHandle);
+
+    void ColorVolumeChanged([const] AvnSurfaceColorInfo& info);
 }
 
 [uuid(939b6599-40a8-4710-a4c8-5d72d8f174fb)]
@@ -1107,6 +1120,7 @@ interface IAvnMetalDevice : IUnknown
 interface IAvnMetalRenderTarget : IUnknown
 {
     HRESULT BeginDrawing(IAvnMetalRenderingSession** ret);
+    AvnPixelFormat GetPixelFormat();
 }
 
 [uuid(a1f4fcde-9152-48bd-bf8a-b1b651134a69)]
@@ -1144,6 +1158,7 @@ interface IAvnMetalRenderingSession : IUnknown
      HRESULT GetPixelSize(AvnPixelSize* ret);
      double GetScaling();
      [intptr]void* GetTexture();
+    HRESULT GetColorInfo(AvnSurfaceColorInfo* ret);
 }
 
 [uuid(60992d19-38f0-4141-a0a9-76ac303801f3)]

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Controls.Platform;
@@ -59,7 +60,8 @@ internal class MacOSTopLevelHandle : IPlatformHandle, IMacOSTopLevelPlatformHand
     }
 }
 
-internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface
+internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface,
+    IPlatformSurfaceColorVolumeFeature, IPlatformHdrContentFeature
 {
     protected IInputRoot? _inputRoot;
     private NativeControlHostImpl? _nativeControlHost;
@@ -81,6 +83,9 @@ internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface
 
     private object _syncRoot = new object();
     private IPlatformRenderSurface[]? _surfaces;
+    private ColorVolumeState _colorVolumeState = new(MacOSColorVolume.FromNative(default));
+    private bool _hasHdrContent;
+    private PlatformHdrContentMetadata? _hdrMetadata;
 
     public TopLevelImpl(IAvaloniaNativeFactory factory)
     {
@@ -101,6 +106,7 @@ internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface
         _platformBehaviorInhibition = new PlatformBehaviorInhibition(Factory.CreatePlatformBehaviorInhibition());
         _surfaces = [new GlPlatformSurface(Native), new MetalPlatformSurface(Native), this];
         InputMethod = new AvaloniaNativeTextInputMethod(Native);
+        UpdateColorVolume(Native.ColorInfo);
     }
 
     internal void BeginDraggingSession(
@@ -143,6 +149,35 @@ internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface
     public Compositor Compositor => AvaloniaNativePlatform.Compositor;
     public Action? Closed { get; set; }
     public Action? LostFocus { get; set; }
+
+    public PlatformSurfaceColorVolume? PreferredColorVolume => Volatile.Read(ref _colorVolumeState).Value;
+    public event EventHandler? PreferredColorVolumeChanged;
+
+    public void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        metadata = PlatformHdrContentMetadata.Normalize(hasHdrContent, metadata);
+        if (_hasHdrContent == hasHdrContent && _hdrMetadata == metadata)
+            return;
+        _hasHdrContent = hasHdrContent;
+        _hdrMetadata = metadata;
+        Native?.SetHdrContent(hasHdrContent ? 1 : 0);
+    }
+
+    private void UpdateColorVolume(AvnSurfaceColorInfo info)
+    {
+        var volume = MacOSColorVolume.FromNative(info);
+        if (PreferredColorVolume == volume)
+            return;
+        Volatile.Write(ref _colorVolumeState, new ColorVolumeState(volume));
+        PreferredColorVolumeChanged?.Invoke(this, EventArgs.Empty);
+        Invalidate();
+    }
+
+    private sealed class ColorVolumeState(PlatformSurfaceColorVolume value)
+    {
+        public PlatformSurfaceColorVolume Value { get; } = value;
+    }
 
     public WindowTransparencyLevel TransparencyLevel
     {
@@ -345,6 +380,10 @@ internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface
 
     public virtual object? TryGetFeature(Type featureType)
     {
+        if (featureType == typeof(IPlatformSurfaceColorVolumeFeature) ||
+            featureType == typeof(IPlatformHdrContentFeature))
+            return this;
+
         if (featureType == typeof(ITextInputMethodImpl))
         {
             return InputMethod;
@@ -470,6 +509,11 @@ internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface
         {
             _parent._savedScaling = scaling;
             _parent.ScalingChanged?.Invoke(scaling);
+        }
+
+        void IAvnTopLevelEvents.ColorVolumeChanged(AvnSurfaceColorInfo* info)
+        {
+            _parent.UpdateColorVolume(*info);
         }
 
         void IAvnTopLevelEvents.RunRenderPriorityJobs()

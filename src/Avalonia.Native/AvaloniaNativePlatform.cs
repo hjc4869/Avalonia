@@ -166,7 +166,7 @@ namespace Avalonia.Native
                 {
                     try
                     {
-                        var metal = new MetalPlatformGraphics(_factory);
+                        var metal = new MetalPlatformGraphics(_factory, options.ColorMode);
                         metal.CreateContext().Dispose();
                         _platformGraphics = metal;
                         break;

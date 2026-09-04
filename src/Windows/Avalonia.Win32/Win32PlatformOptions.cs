@@ -97,6 +97,36 @@ public enum Win32CompositionMode
 }
 
 /// <summary>
+/// The color space Avalonia renders its Windows composition surfaces in.
+/// </summary>
+public enum Win32ColorMode
+{
+    /// <summary>
+    /// Non color managed 8 bit sRGB. This is the default and matches Avalonia's behaviour on every
+    /// other backend.
+    /// </summary>
+    Standard,
+
+    /// <summary>
+    /// A 16 bit float scRGB surface: sRGB primaries with an extended linear transfer function, so
+    /// channel values below 0 and above 1 are meaningful. This is the wide gamut / HDR capable mode
+    /// and is the format the DWM composes in natively, so it is also used to display wide gamut
+    /// content on SDR displays.
+    /// </summary>
+    /// <remarks>
+    /// Existing controls keep their appearance because Skia color converts their sRGB colors into
+    /// scRGB, while custom drawing operations can emit colors outside of the sRGB gamut and above
+    /// the SDR white level. On HDR outputs, ordinary SDR content follows the SDR content brightness
+    /// configured in Windows. Note that blending and gradient interpolation happen in linear light,
+    /// which visibly differs from Avalonia's historical sRGB-encoded blending.
+    /// Requires <see cref="Win32RenderingMode.AngleEgl"/> together with
+    /// <see cref="Win32CompositionMode.WinUIComposition"/> or
+    /// <see cref="Win32CompositionMode.DirectComposition"/>; it is silently ignored otherwise.
+    /// </remarks>
+    ExtendedLinear
+}
+
+/// <summary>
 /// Platform-specific options which apply to Windows.
 /// </summary>
 public class Win32PlatformOptions
@@ -164,6 +194,12 @@ public class Win32PlatformOptions
     /// and <see cref="CompositionMode"/> only accepts null or <see cref="Win32CompositionMode.RedirectionSurface"/>.
     /// </summary>
     public IPlatformGraphics? CustomPlatformGraphics { get; set; }
+
+    /// <summary>
+    /// Opts in to rendering into a wide gamut, extended range surface. The default value is
+    /// <see cref="Win32ColorMode.Standard"/>, which preserves Avalonia's historical behaviour.
+    /// </summary>
+    public Win32ColorMode ColorMode { get; set; } = Win32ColorMode.Standard;
 
     /// <summary>
     /// Gets or sets the application's DPI awareness.

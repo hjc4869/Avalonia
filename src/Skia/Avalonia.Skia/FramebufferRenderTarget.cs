@@ -61,7 +61,8 @@ namespace Avalonia.Skia
             
             var framebufferImageInfo = new SKImageInfo(framebuffer.Size.Width, framebuffer.Size.Height,
                 framebuffer.Format.ToSkColorType(),
-                framebuffer.AlphaFormat.ToSkAlphaType());
+                framebuffer.AlphaFormat.ToSkAlphaType(),
+                framebuffer.ColorFormat.ToSkColorSpace(framebuffer.PreferredColorVolume));
 
             CreateSurface(framebufferImageInfo, framebuffer);
             _hadConversionShim |= _conversionShim != null;
@@ -76,7 +77,9 @@ namespace Avalonia.Skia
             {
                 Surface = _framebufferSurface,
                 Dpi = framebuffer.Dpi,
-                ScaleDrawingToDpi = _useScaledDrawing
+                ScaleDrawingToDpi = _useScaledDrawing,
+                ColorFormat = framebuffer.ColorFormat,
+                PreferredColorVolume = framebuffer.PreferredColorVolume
             };
 
             properties = new()
@@ -98,7 +101,12 @@ namespace Avalonia.Skia
         {
             return currentImageInfo.Width == desiredImageInfo.Width &&
                    currentImageInfo.Height == desiredImageInfo.Height &&
-                   currentImageInfo.ColorType == desiredImageInfo.ColorType;
+                     currentImageInfo.ColorType == desiredImageInfo.ColorType &&
+                     currentImageInfo.AlphaType == desiredImageInfo.AlphaType &&
+                                     (currentImageInfo.ColorSpace is null
+                                             ? desiredImageInfo.ColorSpace is null
+                                             : desiredImageInfo.ColorSpace is not null &&
+                                                 SKColorSpace.Equal(currentImageInfo.ColorSpace, desiredImageInfo.ColorSpace));
         }
 
         /// <summary>
@@ -173,7 +181,8 @@ namespace Avalonia.Skia
                 _framebufferAddress = framebufferAddress;
 
                 // Create bitmap using default platform settings
-                _bitmap = new SKBitmap(destinationInfo.Width, destinationInfo.Height);
+                _bitmap = new SKBitmap(new SKImageInfo(destinationInfo.Width, destinationInfo.Height,
+                    SKImageInfo.PlatformColorType, SKAlphaType.Premul, destinationInfo.ColorSpace));
                 SKColorType bitmapColorType;
 
                 if (!_bitmap.CanCopyTo(destinationInfo.ColorType))

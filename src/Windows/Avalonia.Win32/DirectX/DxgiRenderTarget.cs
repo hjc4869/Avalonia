@@ -160,6 +160,10 @@ namespace Avalonia.Win32.DirectX
             }
         }
 
+        protected override PlatformSurfaceColorVolume? PreferredColorVolume =>
+            (_window as EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume)
+            ?.PreferredColorVolume;
+
         public override void Dispose()
         {
             base.Dispose();

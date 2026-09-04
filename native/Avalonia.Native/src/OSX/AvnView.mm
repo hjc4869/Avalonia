@@ -30,6 +30,7 @@
 
 - (void)onClosed
 {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     @synchronized (self)
     {
         _parent = nullptr;
@@ -81,6 +82,16 @@
 
     _parent = parent;
 
+    auto notifications = [NSNotificationCenter defaultCenter];
+    [notifications addObserver:self selector:@selector(screenParametersChanged:)
+                          name:NSApplicationDidChangeScreenParametersNotification object:nil];
+    [notifications addObserver:self selector:@selector(screenParametersChanged:)
+                          name:NSScreenColorSpaceDidChangeNotification object:nil];
+    [notifications addObserver:self selector:@selector(windowScreenChanged:)
+                          name:NSWindowDidChangeScreenNotification object:nil];
+    [notifications addObserver:self selector:@selector(windowScreenChanged:)
+                          name:NSWindowDidChangeOcclusionStateNotification object:nil];
+
     // NSTrackingInVisibleRect makes AppKit follow the visible bounds of the view.
     // Because of this, the tracking area does not need to change on resize.
     // Do not remove and add the area again on each live-resize tick.
@@ -102,6 +113,35 @@
     _selectedRange = NSMakeRange(0, 0);
     
     return self;
+}
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)screenParametersChanged:(NSNotification*)notification
+{
+    if (![NSThread isMainThread])
+    {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self screenParametersChanged:notification]; });
+        return;
+    }
+    auto parent = _parent.tryGet();
+    if (parent != nullptr)
+        parent->UpdateColorInfo();
+}
+
+- (void)windowScreenChanged:(NSNotification*)notification
+{
+    if (notification.object == self.window)
+        [self screenParametersChanged:notification];
+}
+
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+    [self screenParametersChanged:nil];
 }
 
 - (BOOL)isFlipped
@@ -193,6 +233,7 @@
 
 - (void) viewDidChangeBackingProperties
 {
+    [self screenParametersChanged:nil];
     auto fsize = [self convertSizeToBacking: [self frame].size];
     _lastPixelSize.Width = (int)fsize.width;
     _lastPixelSize.Height = (int)fsize.height;

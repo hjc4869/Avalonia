@@ -13,6 +13,8 @@ namespace Avalonia.Skia
         private readonly SkiaTypeface _glyphTypefaceImpl;
         private readonly ushort[] _glyphIndices;
         private readonly SKPoint[] _glyphPositions;
+        private SKPath? _textPath;
+        private bool _textPathCreated;
 
         // A two level cache optimized for single-entry read. Uses TextOptions as a key.
         private readonly TwoLevelCache<TextOptions, SKTextBlob> _textBlobCache =
@@ -130,6 +132,34 @@ namespace Avalonia.Skia
             });
         }
 
+        public SKPath? GetTextPath()
+        {
+            if (_textPathCreated)
+                return _textPath;
+
+            _textPathCreated = true;
+            using var font = _glyphTypefaceImpl.CreateSKFont((float)FontRenderingEmSize);
+            var textPath = new SKPath();
+
+            for (var i = 0; i < _glyphIndices.Length; i++)
+            {
+                using var glyphPath = font.GetGlyphPath(_glyphIndices[i]);
+                if (glyphPath is null)
+                {
+                    textPath.Dispose();
+                    return null;
+                }
+
+                glyphPath.Transform(SKMatrix.CreateTranslation(
+                    _glyphPositions[i].X + (float)BaselineOrigin.X,
+                    _glyphPositions[i].Y + (float)BaselineOrigin.Y));
+                textPath.AddPath(glyphPath);
+            }
+
+            _textPath = textPath;
+            return textPath;
+        }
+
         private SKFont CreateFont(TextOptions textOptions)
         {
             // Determine edging from TextRenderingMode
@@ -147,11 +177,11 @@ namespace Avalonia.Skia
                 TextHintingMode.None => SKFontHinting.None,
                 TextHintingMode.Light => SKFontHinting.Slight,
                 TextHintingMode.Strong => SKFontHinting.Full,
-                _ => SKFontHinting.Full,
+                _ => edging == SKFontEdging.Antialias ? SKFontHinting.Slight : SKFontHinting.Full,
             };
 
             // Force auto-hinting for "Slight" mode (prefer autohinter over bytecode hints), otherwise default.
-            var forceAutoHinting = textOptions.TextHintingMode == TextHintingMode.Light;
+            var forceAutoHinting = hinting == SKFontHinting.Slight;
 
             // Subpixel rendering enabled when edging is not alias.
             var subpixel = edging != SKFontEdging.Alias;
@@ -173,6 +203,7 @@ namespace Avalonia.Skia
         public void Dispose()
         {
             _textBlobCache.ClearAndDispose();
+            _textPath?.Dispose();
         }
 
         public IReadOnlyList<float> GetIntersections(float lowerLimit, float upperLimit)

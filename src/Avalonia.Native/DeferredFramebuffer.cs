@@ -29,6 +29,9 @@ namespace Avalonia.Native
         public Vector Dpi { get; set; }
         public PixelFormat Format { get; set; }
         public AlphaFormat AlphaFormat { get; set; }
+        public PlatformSurfaceColorFormat ColorFormat =>
+            new(PlatformPixelEncoding.Default, PlatformColorSpace.Srgb);
+        public PlatformSurfaceColorVolume? PreferredColorVolume => MacOSColorVolume.FromNative(default);
 
         public void Dispose()
         {

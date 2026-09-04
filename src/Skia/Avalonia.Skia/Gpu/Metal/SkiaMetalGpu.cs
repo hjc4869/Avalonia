@@ -110,7 +110,11 @@ internal class SkiaMetalGpu : ISkiaGpu
 
                 surface = SKSurface.Create(_gpu._context!, backendTarget,
                     session.IsYFlipped ? GRSurfaceOrigin.BottomLeft : GRSurfaceOrigin.TopLeft,
-                    SKColorType.Bgra8888);
+                    session.ColorFormat.ToSkColorType(SKColorType.Bgra8888),
+                    session.ColorFormat.ToSkColorSpace(session.PreferredColorVolume));
+
+                if (surface is null)
+                    throw new InvalidOperationException("Unable to create a Skia surface for the Metal drawable.");
 
                 var result = new SkiaMetalRenderSession(_gpu, surface, session, backendTarget);
                 success = true;
@@ -128,6 +132,7 @@ internal class SkiaMetalGpu : ISkiaGpu
         }
 
         public PlatformRenderTargetState State => _target?.State ?? PlatformRenderTargetState.Disposed;
+        public PlatformSurfaceColorFormat ColorFormat => _target?.ColorFormat ?? default;
     }
     
     internal class SkiaMetalRenderSession : ISkiaGpuRenderSession
@@ -169,6 +174,8 @@ internal class SkiaMetalGpu : ISkiaGpu
         public GRContext GrContext => _gpu._context!;
         public SKSurface SkSurface => _surface!;
         public double ScaleFactor => _session!.Scaling;
+        public PlatformSurfaceColorFormat ColorFormat => _session!.ColorFormat;
+        public PlatformSurfaceColorVolume? PreferredColorVolume => _session!.PreferredColorVolume;
 
         public GRSurfaceOrigin SurfaceOrigin =>
             _session!.IsYFlipped ? GRSurfaceOrigin.BottomLeft : GRSurfaceOrigin.TopLeft;

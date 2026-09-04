@@ -4,6 +4,7 @@
 #include "common.h"
 #include "rendertarget.h"
 #import "crapium.h"
+#include <mutex>
 
 
 class API_AVAILABLE(macos(12.0)) AvnMTLSharedEvent : public ComSingleObject<IAvnMTLSharedEvent, &IID_IAvnMTLSharedEvent>
@@ -182,13 +183,15 @@ class AvnMetalRenderSession : public ComSingleObject<IAvnMetalRenderingSession, 
     AvnPixelSize _size;
     double _scaling;
     bool _presentWithTransaction;
+    AvnSurfaceColorInfo _colorInfo;
 public:
     FORWARD_IUNKNOWN()
 
-    AvnMetalRenderSession(AvnMetalDevice* device, CAMetalLayer* layer, id <CAMetalDrawable> drawable, const AvnPixelSize &size, double scaling, bool presentWithTransaction)
+    AvnMetalRenderSession(AvnMetalDevice* device, CAMetalLayer* layer, id <CAMetalDrawable> drawable, const AvnPixelSize &size, double scaling, bool presentWithTransaction, AvnSurfaceColorInfo colorInfo)
             : _drawable(drawable), _size(size), _scaling(scaling), _queue(device->queue),
-            _texture([drawable texture]), _presentWithTransaction(presentWithTransaction) {
+            _texture([drawable texture]), _presentWithTransaction(presentWithTransaction), _colorInfo(colorInfo) {
         _layer = layer;
+        _colorInfo.PixelFormat = _texture.pixelFormat == MTLPixelFormatRGBA16Float ? kAvnRgbaF16 : kAvnBgra8888;
     }
 
     HRESULT GetPixelSize(AvnPixelSize *ret) override {
@@ -202,6 +205,13 @@ public:
 
     void *GetTexture() override {
         return (__bridge void*) _texture;
+    }
+
+    HRESULT GetColorInfo(AvnSurfaceColorInfo* ret) override {
+        if (ret == nullptr)
+            return E_POINTER;
+        *ret = _colorInfo;
+        return S_OK;
     }
 
     ~AvnMetalRenderSession()
@@ -230,6 +240,8 @@ class AvnMetalRenderTarget : public ComSingleObject<IAvnMetalRenderTarget, &IID_
     double _scaling = 1;
     AvnPixelSize _size = {1,1};
     ComPtr<AvnMetalDevice> _device;
+    std::mutex _colorInfoMutex;
+    AvnSurfaceColorInfo _colorInfo = {kAvnBgra8888, 1, 1};
 public:
     double PendingScaling = 1;
     AvnPixelSize PendingSize = {1,1};
@@ -238,6 +250,15 @@ public:
     {
         _layer = layer;
         _device = device;
+    }
+
+    AvnPixelFormat GetPixelFormat() override {
+        return _layer.pixelFormat == MTLPixelFormatRGBA16Float ? kAvnRgbaF16 : kAvnBgra8888;
+    }
+
+    void SetColorInfo(AvnSurfaceColorInfo info) {
+        std::lock_guard<std::mutex> guard(_colorInfoMutex);
+        _colorInfo = info;
     }
 
     HRESULT BeginDrawing(IAvnMetalRenderingSession **ret) override {
@@ -267,7 +288,12 @@ public:
             *ret = nullptr;
             return E_FAIL;
         }
-        *ret = new AvnMetalRenderSession(_device, _layer, drawable, _size, _scaling, onMainThread);
+        AvnSurfaceColorInfo colorInfo;
+        {
+            std::lock_guard<std::mutex> guard(_colorInfoMutex);
+            colorInfo = _colorInfo;
+        }
+        *ret = new AvnMetalRenderSession(_device, _layer, drawable, _size, _scaling, onMainThread, colorInfo);
         return 0;
     }
 };
@@ -278,11 +304,25 @@ public:
     CAMetalLayer* _layer;
     ComPtr<AvnMetalRenderTarget> _target;
 }
-- (MetalRenderTarget *)initWithDevice:(IAvnMetalDevice *)device {
+- (MetalRenderTarget *)initWithDevice:(IAvnMetalDevice *)device extendedLinear:(bool)extendedLinear {
+    self = [super init];
     _device = dynamic_cast<AvnMetalDevice*>(device);
     _layer = [CAMetalLayer new];
     _layer.opaque = false;
     _layer.device = _device->device;
+    _layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    auto colorSpaceName = kCGColorSpaceSRGB;
+    if (@available(macOS 10.15, *))
+    {
+        if (extendedLinear)
+        {
+            _layer.pixelFormat = MTLPixelFormatRGBA16Float;
+            colorSpaceName = kCGColorSpaceExtendedLinearSRGB;
+        }
+    }
+    auto colorSpace = CGColorSpaceCreateWithName(colorSpaceName);
+    _layer.colorspace = colorSpace;
+    CGColorSpaceRelease(colorSpace);
     _target.setNoAddRef(new AvnMetalRenderTarget(_layer, _device));
     return self;
 }
@@ -291,6 +331,19 @@ public:
 -(void) getRenderTarget: (IAvnMetalRenderTarget**) ppv
 {
     *ppv = static_cast<IAvnMetalRenderTarget*>(_target.getRetainedReference());
+}
+
+- (AvnPixelFormat)pixelFormat {
+    return _target->GetPixelFormat();
+}
+
+- (void)setColorInfo:(AvnSurfaceColorInfo)info {
+    _target->SetColorInfo(info);
+}
+
+- (void)setHdrContent:(bool)hasHdrContent {
+    if (@available(macOS 10.15, *))
+        _layer.wantsExtendedDynamicRangeContent = hasHdrContent && [self pixelFormat] == kAvnRgbaF16;
 }
 
 - (void)resize:(AvnPixelSize)size withScale:(float)scale {

@@ -45,7 +45,7 @@ public:
                            
     virtual HRESULT CreateSoftwareRenderTarget(IAvnSoftwareRenderTarget** ret) override;
                                                   
-    virtual HRESULT CreateMetalRenderTarget(IAvnMetalDevice* device, IAvnMetalRenderTarget** ret) override;
+    virtual HRESULT CreateMetalRenderTarget(IAvnMetalDevice* device, bool extendedLinear, IAvnMetalRenderTarget** ret) override;
                            
     virtual HRESULT CreateGlRenderTarget(IAvnGlContext* context, IAvnGlSurfaceRenderTarget** ret) override;
 
@@ -61,6 +61,10 @@ public:
 
     virtual HRESULT GetCurrentDisplayId (CGDirectDisplayID* ret) override;
 
+    virtual HRESULT GetColorInfo(AvnSurfaceColorInfo* ret) override;
+    virtual HRESULT SetHdrContent(bool hasHdrContent) override;
+    void UpdateColorInfo();
+
     virtual HRESULT BeginDragAndDropOperation(
         AvnDragDropEffects effects,
         AvnPoint point,
@@ -71,6 +75,8 @@ public:
 protected:
     NSCursor *cursor;
     virtual void UpdateAppearance();
+    bool _hasHdrContent = false;
+    AvnSurfaceColorInfo _colorInfo = {kAvnBgra8888, 1, 1};
                            
 public:
     NSObject<IRenderTarget> *currentRenderTarget;

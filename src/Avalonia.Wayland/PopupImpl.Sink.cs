@@ -44,6 +44,8 @@ partial class PopupImpl
             if (Parent.CurrentCursor is not null)
                 Parent.ApplyCurrentCursor(_surfaceProxy);
 
+            Parent.ApplyHdrContent(_surfaceProxy);
+
             // A fresh worker WSurface starts hit-test visible.
             if (!Parent._isHitTestVisible)
                 _surfaceProxy.SetHitTestVisible(false);

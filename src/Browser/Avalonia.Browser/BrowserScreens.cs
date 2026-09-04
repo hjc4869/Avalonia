@@ -31,9 +31,44 @@ internal sealed class BrowserScreen(JSObject screen) : PlatformScreen(new JSObje
     }
 }
 
-internal sealed class BrowserScreens : ScreensBase<JSObject, BrowserScreen>
+internal sealed class BrowserScreens : ScreensBase<JSObject, BrowserScreen>, IPlatformSurfaceColorVolumeFeature
 {
+    private readonly object _colorVolumeLock = new();
+    private PlatformSurfaceColorVolume? _preferredColorVolume = CreateColorVolume(double.NaN);
     private bool _isExtended;
+
+    public PlatformSurfaceColorVolume? PreferredColorVolume
+    {
+        get
+        {
+            lock (_colorVolumeLock)
+                return _preferredColorVolume;
+        }
+    }
+
+    public event EventHandler? PreferredColorVolumeChanged;
+
+    internal void UpdateHdrHeadroom(double headroom)
+    {
+        var volume = CreateColorVolume(headroom);
+        lock (_colorVolumeLock)
+        {
+            if (_preferredColorVolume == volume)
+                return;
+            _preferredColorVolume = volume;
+        }
+        PreferredColorVolumeChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal static PlatformSurfaceColorVolume CreateColorVolume(double headroom)
+    {
+        return new PlatformSurfaceColorVolume(Transfer: PlatformTransferFunction.Linear)
+        {
+            ReferenceWhiteScale = 1,
+            HeadroomRatio = double.IsFinite(headroom) && headroom >= 0 ? Math.Pow(2, headroom) : null,
+            ToneMapping = PlatformToneMappingMode.Client
+        }.Normalize();
+    }
 
     public BrowserScreens()
     {

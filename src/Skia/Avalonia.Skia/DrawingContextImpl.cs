@@ -36,6 +36,9 @@ namespace Avalonia.Skia
         private GRContext? _grContext;
         public GRContext? GrContext => _grContext;
         private readonly ISkiaGpu? _gpu;
+        private readonly PlatformSurfaceColorFormat _colorFormat;
+        public PlatformSurfaceColorFormat ColorFormat => _colorFormat;
+        private readonly PlatformSurfaceColorVolume? _preferredColorVolume;
         private readonly SKPaint _strokePaint = SKPaintCache.Shared.Get();
         private readonly SKPaint _fillPaint = SKPaintCache.Shared.Get();
         private readonly SKPaint _boxShadowPaint = SKPaintCache.Shared.Get();
@@ -83,6 +86,18 @@ namespace Avalonia.Skia
             /// Skia GPU provider context (optional)
             /// </summary>
             public ISkiaGpu? Gpu;
+
+            /// <summary>
+            /// Pixel encoding and color space of the target surface. PQ composition layers use
+            /// FP16 scRGB; other intermediate surfaces inherit their parent's format.
+            /// </summary>
+            public PlatformSurfaceColorFormat ColorFormat;
+
+            /// <summary>
+            /// Color volume the platform preferred for the target surface when the frame began.
+            /// Snapshotted so it stays stable for the whole frame.
+            /// </summary>
+            public PlatformSurfaceColorVolume? PreferredColorVolume;
 
             public ISkiaGpuRenderSession? CurrentSession;
         }
@@ -134,6 +149,10 @@ namespace Avalonia.Skia
                 public GRContext? GrContext => _context.GrContext;
                 public SKSurface? SkSurface => CheckLease(_context.Surface);
                 public double CurrentOpacity => CheckLease(_context._currentOpacity);
+                public PlatformSurfaceColorFormat ColorFormat => _context._colorFormat;
+                public SKColorSpace? SkColorSpace =>
+                    _context._colorFormat.ToSkColorSpace(_context._preferredColorVolume);
+                public PlatformSurfaceColorVolume? PreferredColorVolume => _context._preferredColorVolume;
 
 
                 public void Dispose()
@@ -192,6 +211,8 @@ namespace Avalonia.Skia
             _disableSubpixelTextRendering = createInfo.DisableSubpixelTextRendering;
             _grContext = createInfo.GrContext;
             _gpu = createInfo.Gpu;
+            _colorFormat = createInfo.ColorFormat;
+            _preferredColorVolume = createInfo.PreferredColorVolume;
             if (_grContext != null)
                 Monitor.Enter(_grContext);
             Surface = createInfo.Surface;
@@ -608,18 +629,6 @@ namespace Avalonia.Skia
                 // Determine effective TextOptions for text rendering. Start with current pushed TextOptions.
                 var effectiveTextOptions = TextOptions;
 
-                // If subpixel rendering is disabled globally, map subpixel modes to grayscale.
-                if (_disableSubpixelTextRendering)
-                {
-                    var mode = effectiveTextOptions.TextRenderingMode;
-
-                    if (mode == TextRenderingMode.SubpixelAntialias ||
-                        (mode == TextRenderingMode.Unspecified && (RenderOptions.EdgeMode == EdgeMode.Antialias || RenderOptions.EdgeMode == EdgeMode.Unspecified)))
-                    {
-                        effectiveTextOptions = effectiveTextOptions with { TextRenderingMode = TextRenderingMode.Antialias };
-                    }
-                }
-
                 var renderOptions = RenderOptions;
 
                 // If TextRenderingMode is unspecified in TextOptions, use the one from RenderOptions.
@@ -630,10 +639,31 @@ namespace Avalonia.Skia
                 }
 #pragma warning restore CS0618
 
-                var textBlob = glyphRunImpl.GetTextBlob(effectiveTextOptions, RenderOptions);
+                // If subpixel rendering is disabled globally, map subpixel modes to grayscale.
+                if (_disableSubpixelTextRendering || _colorFormat.IsExtendedRange)
+                {
+                    var mode = effectiveTextOptions.TextRenderingMode;
 
-                Canvas.DrawText(textBlob, (float)glyphRun.BaselineOrigin.X,
-                    (float)glyphRun.BaselineOrigin.Y, paintWrapper.Paint);
+                    if (mode == TextRenderingMode.SubpixelAntialias ||
+                        (mode == TextRenderingMode.Unspecified && (RenderOptions.EdgeMode == EdgeMode.Antialias || RenderOptions.EdgeMode == EdgeMode.Unspecified)))
+                    {
+                        effectiveTextOptions = effectiveTextOptions with { TextRenderingMode = TextRenderingMode.Antialias };
+                    }
+                }
+
+                // Ganesh packs atlas text colors into 8-bit vertices, which clips scaled scRGB values.
+                if (OperatingSystem.IsWindows() && _colorFormat.ColorSpace == PlatformColorSpace.ScRgbLinear &&
+                    glyphRunImpl.GetTextPath() is { } textPath)
+                {
+                    // The cached path includes the baseline origin, keeping brush coordinates unchanged.
+                    Canvas.DrawPath(textPath, paintWrapper.Paint);
+                }
+                else
+                {
+                    var textBlob = glyphRunImpl.GetTextBlob(effectiveTextOptions, RenderOptions);
+                    Canvas.DrawText(textBlob, (float)glyphRun.BaselineOrigin.X,
+                        (float)glyphRun.BaselineOrigin.Y, paintWrapper.Paint);
+                }
             }
         }
 
@@ -1264,16 +1294,6 @@ namespace Avalonia.Skia
                                          Matrix.CreateTranslation(alignmentTranslate);
             }
             
-            // Pre-rasterize the tile into SKPicture
-            using var pictureTarget = new PictureRenderTarget(_gpu, _grContext, _intermediateSurfaceDpi);
-            using (var ctx = pictureTarget.CreateDrawingContext(tileSize, false))
-            {
-                ctx.PushRenderOptions(RenderOptions);
-                content.Render(ctx, contentRenderTransform);
-                ctx.PopRenderOptions();
-            }
-            using var tile = pictureTarget.GetPicture();
-            
             // If there is no BrushTransform and destinationRect is at (0,0) we don't need any transforms
             Matrix shaderTransform = Matrix.Identity;
             
@@ -1292,6 +1312,50 @@ namespace Avalonia.Skia
             
             // Create shader
             var (tileX, tileY) = GetTileModes(content.Brush.TileMode);
+            if (_colorFormat.IsExtendedRange)
+            {
+                var total = Canvas.TotalMatrix.PreConcat(shaderTransform.ToSKMatrix());
+                var scaleX = Math.Sqrt((double)total.ScaleX * total.ScaleX + (double)total.SkewY * total.SkewY);
+                var scaleY = Math.Sqrt((double)total.ScaleY * total.ScaleY + (double)total.SkewX * total.SkewX);
+                var width = tileSize.Width * scaleX;
+                var height = tileSize.Height * scaleY;
+                if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
+                {
+                    paintWrapper.Paint.Color = SKColor.Empty;
+                    return;
+                }
+
+                const int maxTileArea = 2048 * 2048;
+                var maxDimension = Math.Min(maxTileArea, _grContext?.MaxRenderTargetSize ?? maxTileArea);
+                var reduction = Math.Min(1, 2048.0 / Math.Sqrt(width) / Math.Sqrt(height));
+                reduction = Math.Min(reduction, Math.Min(maxDimension / width, maxDimension / height));
+                var pixelWidth = Math.Clamp((int)Math.Ceiling(width * reduction), 1, maxDimension);
+                var pixelHeight = Math.Clamp((int)Math.Ceiling(height * reduction), 1, maxDimension);
+                using var intermediate = CreateRenderTarget(new PixelSize(pixelWidth, pixelHeight), false, false);
+                using (var ctx = intermediate.CreateDrawingContext())
+                {
+                    ctx.Clear(Colors.Transparent);
+                    ctx.PushRenderOptions(RenderOptions);
+                    content.Render(ctx, contentRenderTransform * Matrix.CreateScale(
+                        pixelWidth / tileSize.Width, pixelHeight / tileSize.Height));
+                    ctx.PopRenderOptions();
+                }
+                using var image = intermediate.SnapshotImage();
+                var imageTransform = Matrix.CreateScale(tileSize.Width / pixelWidth, tileSize.Height / pixelHeight)
+                    * shaderTransform;
+                using var imageShader = image.ToShader(tileX, tileY, imageTransform.ToSKMatrix());
+                paintWrapper.Paint.Shader = imageShader;
+                return;
+            }
+
+            using var pictureTarget = new PictureRenderTarget(_gpu, _grContext, _intermediateSurfaceDpi);
+            using (var ctx = pictureTarget.CreateDrawingContext(tileSize, false))
+            {
+                ctx.PushRenderOptions(RenderOptions);
+                content.Render(ctx, contentRenderTransform);
+                ctx.PopRenderOptions();
+            }
+            using var tile = pictureTarget.GetPicture();
             using(var shader = tile.ToShader(tileX, tileY, shaderTransform.ToSKMatrix(), 
                       new SKRect(0, 0, tile.CullRect.Width, tile.CullRect.Height)))
             {
@@ -1500,17 +1564,27 @@ namespace Avalonia.Skia
         /// <returns></returns>
         private SurfaceRenderTarget CreateRenderTarget(PixelSize pixelSize, bool isLayer, bool useScaledDrawing, PixelFormat? format = null)
         {
+            var useLinearLayer = isLayer && _colorFormat.ColorSpace == PlatformColorSpace.Rec2020Pq;
+            var colorFormat = useLinearLayer
+                ? new PlatformSurfaceColorFormat(PlatformPixelEncoding.RgbaF16, PlatformColorSpace.ScRgbLinear)
+                : _colorFormat;
+            var colorVolume = useLinearLayer && _preferredColorVolume is { } volume
+                ? volume with { SurfaceNitsPerUnit = null, ReferenceWhiteScale = 1 }
+                : _preferredColorVolume;
+
             var createInfo = new SurfaceRenderTarget.CreateInfo
             {
                 Width = pixelSize.Width,
                 Height = pixelSize.Height,
                 Dpi = _intermediateSurfaceDpi,
                 Format = format,
+                ColorFormat = colorFormat,
+                PreferredColorVolume = colorVolume,
                 DisableTextLcdRendering = isLayer ? _disableSubpixelTextRendering : true,
                 GrContext = _grContext,
                 Gpu = _gpu,
                 Session = _session,
-                DisableManualFbo = !isLayer,
+                DisableManualFbo = !isLayer || useLinearLayer,
                 UseScaledDrawing = useScaledDrawing
             };
 

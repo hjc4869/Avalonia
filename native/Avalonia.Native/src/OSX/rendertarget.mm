@@ -36,6 +36,8 @@
                               };
     
     surface = IOSurfaceCreate((CFDictionaryRef)options);
+    if (surface != nullptr)
+        IOSurfaceSetValue(surface, CFSTR("IOSurfaceColorSpace"), kCGColorSpaceSRGB);
     self->scale = scale;
     self->size = size;
     self->_context = context;
