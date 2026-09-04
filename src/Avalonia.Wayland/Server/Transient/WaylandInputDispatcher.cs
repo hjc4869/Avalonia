@@ -7,12 +7,16 @@ using Avalonia.Wayland.Server.Transient.Clipboard;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Persistent;
 using NWayland;
+using NWayland.Protocols.CursorShapeV1;
 using NWayland.Protocols.Wayland;
 
 namespace Avalonia.Wayland.Server.Transient;
 
 partial class WaylandInputDispatcher : IDisposable
 {
+    private const double DipsPerWheelDelta = 50;
+    private const double ContinuousScrollFactor = 2.5;
+
     private readonly WaylandGlobals _globals;
     private readonly Dictionary<uint, Seat> _seats = new();
 
@@ -144,6 +148,22 @@ partial class WaylandInputDispatcher : IDisposable
         _ => RawInputModifiers.None
     };
 
+    internal static double ConvertAxisDelta(double continuous, double discrete, bool hasDiscrete,
+        WlPointer.AxisSourceEnum? source, double axisUnitsPerDetent)
+    {
+        if (hasDiscrete)
+            return discrete;
+
+        // ScrollContentPresenter maps one Avalonia wheel unit to 50 DIPs. GTK applies
+        // the same 2.5 factor to finger and continuous surface-unit scrolling.
+        // Wheel axis values conventionally use 10 units per detent when discrete data
+        // isn't available (the same fallback used by Qt Wayland).
+        var unitsPerDelta = source is WlPointer.AxisSourceEnum.Finger or WlPointer.AxisSourceEnum.Continuous
+            ? DipsPerWheelDelta / ContinuousScrollFactor
+            : axisUnitsPerDetent;
+        return continuous / unitsPerDelta;
+    }
+
     class Seat : IDisposable
     {
         private readonly WaylandInputDispatcher _dispatcher;
@@ -269,6 +289,7 @@ partial class WaylandInputDispatcher : IDisposable
         private readonly WaylandInputDispatcher _dispatcher;
         private readonly Seat _seat;
         private readonly WlPointer _pointer;
+        private readonly WpCursorShapeDeviceV1? _cursorShapeDevice;
 
         // Persistent pointer state (survives across frames)
         private WSurfaceEventSinkProxy? _focusedSink;
@@ -305,22 +326,40 @@ partial class WaylandInputDispatcher : IDisposable
         private double _frameV120Y;
         private bool _frameV120SeenX;
         private bool _frameV120SeenY;
+        private WlPointer.AxisSourceEnum? _frameAxisSource;
 
         public PointerHandler(WaylandInputDispatcher dispatcher, Seat seat)
         {
             _dispatcher = dispatcher;
             _seat = seat;
             _pointer = seat.WlSeat.GetPointer(new Listener(this));
+            _cursorShapeDevice = dispatcher._globals.CursorShapeManager?.GetPointer(_pointer, null);
         }
 
         // Shared, stateless fallback used when a surface hasn't requested a specific cursor.
         private static readonly WaylandStandardCursor s_defaultCursor = new(StandardCursorType.Arrow);
 
+        /// <summary>
+        /// Names the cursor through <c>cursor-shape-v1</c> when possible so the compositor draws it
+        /// from the user's theme at the right size. Returns false for cursors with no named shape
+        /// (custom bitmaps, hiding the pointer) which still need <c>wl_pointer.set_cursor</c>.
+        /// </summary>
+        private bool TrySetCursorShape(WpCursorShapeDeviceV1.ShapeEnum? shape)
+        {
+            if (_cursorShapeDevice is null || shape is not { } s)
+                return false;
+            _cursorShapeDevice.SetShape(_lastEnterSerial, s);
+            return true;
+        }
+
         private void UpdateCursor()
         {
             if (_focusedSurface == null)
                 return;
-            var image = (_focusedSurface.CurrentCursor ?? s_defaultCursor).Resolve(_dispatcher._globals);
+            var cursor = _focusedSurface.CurrentCursor ?? s_defaultCursor;
+            if (TrySetCursorShape(cursor.Shape))
+                return;
+            var image = cursor.Resolve(_dispatcher._globals);
             if (image is { } c)
                 _pointer.SetCursor(_lastEnterSerial, c.Surface, c.HotspotX, c.HotspotY);
             else
@@ -345,6 +384,8 @@ partial class WaylandInputDispatcher : IDisposable
         /// </remarks>
         internal void SetDndCursor(StandardCursorType cursorType)
         {
+            if (TrySetCursorShape(WaylandStandardCursor.GetShape(cursorType)))
+                return;
             var cursorInfo = _dispatcher._globals.CursorManager.GetCursor(cursorType);
             if (cursorInfo is { } c)
                 _pointer.SetCursor(_lastEnterSerial, c.Surface, c.HotspotX, c.HotspotY);
@@ -362,10 +403,12 @@ partial class WaylandInputDispatcher : IDisposable
             _frameV120Y = 0;
             _frameV120SeenX = false;
             _frameV120SeenY = false;
+            _frameAxisSource = null;
         }
 
         public void Dispose()
         {
+            _cursorShapeDevice?.Dispose();
             _pointer.Release();
         }
 
@@ -443,9 +486,11 @@ partial class WaylandInputDispatcher : IDisposable
                 handler._frameActions.Add(() =>
                 {
                     // Combine v120 (notches) with raw axis (continuous). Per axis, prefer v120
-                    // if any v120 event fired this frame; otherwise scale the raw axis.
-                    var deltaX = handler._frameV120SeenX ? handler._frameV120X : handler._frameAxisRawX / AxisUnitsPerDetent;
-                    var deltaY = handler._frameV120SeenY ? handler._frameV120Y : handler._frameAxisRawY / AxisUnitsPerDetent;
+                    // if any v120 event fired this frame; otherwise normalize the raw axis.
+                    var deltaX = ConvertAxisDelta(handler._frameAxisRawX, handler._frameV120X,
+                        handler._frameV120SeenX, handler._frameAxisSource, AxisUnitsPerDetent);
+                    var deltaY = ConvertAxisDelta(handler._frameAxisRawY, handler._frameV120Y,
+                        handler._frameV120SeenY, handler._frameAxisSource, AxisUnitsPerDetent);
                     if (deltaX != 0 || deltaY != 0)
                     {
                         // Wayland: positive = scroll down/right. Avalonia: positive Y = scroll up.
@@ -470,6 +515,7 @@ partial class WaylandInputDispatcher : IDisposable
 
             protected override void AxisSource(WlPointer eventSender, WlPointer.AxisSourceEnum axisSource)
             {
+                handler._frameAxisSource = axisSource;
             }
 
             protected override void AxisStop(WlPointer eventSender, uint time, WlPointer.AxisEnum axis)
