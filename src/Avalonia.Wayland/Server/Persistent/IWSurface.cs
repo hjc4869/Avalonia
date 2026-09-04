@@ -1,5 +1,6 @@
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
+using Avalonia.Platform;
 using Avalonia.SourceGenerator;
 using Avalonia.Wayland.Server.Transient;
 
@@ -66,4 +67,6 @@ internal interface IWSurface
     /// reconnect.
     /// </summary>
     void SetHitTestVisible(bool value);
+
+    void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata);
 }

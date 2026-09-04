@@ -23,9 +23,11 @@ internal partial class Program
     {
         Trace.Listeners.Add(new ConsoleTraceListener());
     
-        var options = ParseArgs(args) ?? new BrowserPlatformOptions();
+        var options = ParseArgs(args, out var hdrDemo) ?? new BrowserPlatformOptions();
+        HdrDemoApp.PreferHdr = options.PreferHdr;
+        var builder = hdrDemo ? AppBuilder.Configure<HdrDemoApp>() : BuildAvaloniaApp();
     
-        await BuildAvaloniaApp()
+        await builder
             .LogToTrace()
             .AfterSetup(_ =>
             {
@@ -35,7 +37,7 @@ internal partial class Program
 
         Dispatcher.UIThread.Invoke(() =>
         {
-            if (Application.Current!.ApplicationLifetime is ISingleTopLevelApplicationLifetime lifetime)
+            if (!hdrDemo && Application.Current!.ApplicationLifetime is ISingleTopLevelApplicationLifetime lifetime)
             {
                 lifetime.TopLevel!.RendererDiagnostics.DebugOverlays = RendererDebugOverlays.Fps;
             }
@@ -71,8 +73,9 @@ internal partial class Program
     public static AppBuilder BuildAvaloniaApp()
            => AppBuilder.Configure<App>();
 
-    private static BrowserPlatformOptions? ParseArgs(string[] args)
+    private static BrowserPlatformOptions? ParseArgs(string[] args, out bool hdrDemo)
     {
+        hdrDemo = false;
         try
         {
             if (args.Length == 0
@@ -84,6 +87,12 @@ internal partial class Program
 
             var queryParams = HttpUtility.ParseQueryString(uri.Query);
             var options = new BrowserPlatformOptions();
+            bool.TryParse(queryParams["HdrDemo"], out hdrDemo);
+
+            if (bool.TryParse(queryParams[nameof(options.PreferHdr)], out var preferHdr))
+            {
+                options.PreferHdr = preferHdr;
+            }
 
             if (bool.TryParse(queryParams[nameof(options.PreferFileDialogPolyfill)], out var preferDialogsPolyfill))
             {
@@ -100,6 +109,7 @@ internal partial class Program
 
             Console.WriteLine("DemoBrowserPlatformOptions.PreferFileDialogPolyfill: " + options.PreferFileDialogPolyfill);
             Console.WriteLine("DemoBrowserPlatformOptions.RenderingMode: " + string.Join(";", options.RenderingMode));
+            Console.WriteLine("DemoBrowserPlatformOptions.PreferHdr: " + options.PreferHdr);
             return options;
         }
         catch (Exception ex)

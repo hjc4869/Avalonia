@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform;
+using Avalonia.Threading;
 
 namespace Avalonia.Browser.Interop;
 
@@ -52,9 +53,15 @@ internal static partial class DomHelper
     }
 
     [JSExport]
-    public static Task ScreensChanged()
+    public static Task ScreensChanged(double hdrHeadroom)
     {
-        (AvaloniaLocator.Current.GetService<IScreenImpl>() as BrowserScreens)?.OnChanged();
-        return Task.CompletedTask;
+        return Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (AvaloniaLocator.Current.GetService<IScreenImpl>() is BrowserScreens screens)
+            {
+                screens.OnChanged();
+                screens.UpdateHdrHeadroom(hdrHeadroom);
+            }
+        }).GetTask();
     }
 }
