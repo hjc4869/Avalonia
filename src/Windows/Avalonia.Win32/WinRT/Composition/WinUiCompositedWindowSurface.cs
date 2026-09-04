@@ -77,12 +77,19 @@ namespace Avalonia.Win32.WinRT.Composition
         private ICompositionDrawingSurfaceInterop? _surfaceInterop;
         private ICompositionDrawingSurface? _drawingSurface;
 
+        public PlatformSurfaceColorFormat ColorFormat { get; }
+
+        public PlatformSurfaceColorVolume? PreferredColorVolume =>
+            (_window.WindowInfo as EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume)
+            ?.PreferredColorVolume;
+
         public WinUiCompositedWindowRenderTarget(IPlatformGraphicsContext context,
             WinUiCompositedWindow window, IntPtr device,
             ICompositor compositor)
         {
             _context = context;
             _window = window;
+            ColorFormat = Win32SurfaceColorFormat.Negotiated(context);
 
             try
             {
@@ -123,12 +130,18 @@ namespace Avalonia.Win32.WinRT.Composition
 
             // Do not use Premultiplied when the window is not Transparency. Because the Premultiplied AlphaMode will increase the performance loss of DWM. See https://github.com/AvaloniaUI/Avalonia/issues/20643
             var alphaMode = isTransparency ? DirectXAlphaMode.Premultiplied : DirectXAlphaMode.Ignore;
+
+            // The DWM treats FP16 surfaces as scRGB, which is what gives us wide gamut and HDR.
+            var format = ColorFormat.Encoding == PlatformPixelEncoding.RgbaF16
+                ? DirectXPixelFormat.R16G16B16A16Float
+                : DirectXPixelFormat.B8G8R8A8UIntNormalized;
+
             _drawingSurface = _compositionDevice2.CreateDrawingSurface2(new UnmanagedMethods.SIZE()
                 {
                     X = surfaceSize.Width, 
                     Y = surfaceSize.Height,
                 },
-                DirectXPixelFormat.B8G8R8A8UIntNormalized, alphaMode);
+                format, alphaMode);
             _surface = _drawingSurface.QueryInterface<ICompositionSurface>();
             _surfaceInterop = _drawingSurface.QueryInterface<ICompositionDrawingSurfaceInterop>();
 

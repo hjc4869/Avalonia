@@ -12,13 +12,13 @@ export class WebRenderTargetRegistry {
 
     private static nextId = 1;
 
-    static create(pthreadId: number, canvas: HTMLCanvasElement, preferredModes: BrowserRenderingMode[]): number {
+    static create(pthreadId: number, canvas: HTMLCanvasElement, preferredModes: BrowserRenderingMode[], preferHdr: boolean): number {
         const id = WebRenderTargetRegistry.nextId++;
         if (pthreadId === 0) {
             WebRenderTargetRegistry.registry[id] = {
                 canvas
             };
-            WebRenderTargetRegistry.targets[id] = WebRenderTargetRegistry.createRenderTarget(canvas, preferredModes);
+            WebRenderTargetRegistry.targets[id] = WebRenderTargetRegistry.createRenderTarget(canvas, preferredModes, preferHdr);
         } else {
             const self = globalThis as any;
             const module = self.Module ?? self.getDotnetRuntime(0)?.Module;
@@ -35,6 +35,7 @@ export class WebRenderTargetRegistry {
                 avaloniaCmd: "registerCanvas",
                 canvas: offscreen,
                 modes: preferredModes,
+                preferHdr,
                 id
             }, [offscreen]);
             WebRenderTargetRegistry.registry[id] = {
@@ -50,7 +51,7 @@ export class WebRenderTargetRegistry {
         self.onmessage = ev => {
             const msg = ev;
             if (msg.data.avaloniaCmd === "registerCanvas") {
-                WebRenderTargetRegistry.targets[msg.data.id] = WebRenderTargetRegistry.createRenderTarget(msg.data.canvas, msg.data.modes);
+                WebRenderTargetRegistry.targets[msg.data.id] = WebRenderTargetRegistry.createRenderTarget(msg.data.canvas, msg.data.modes, msg.data.preferHdr);
             } else if (msg.data.avaloniaCmd === "unregisterCanvas") {
                 /* eslint-disable */
                 // Our keys are _always_ numbers and are safe to delete
@@ -64,11 +65,11 @@ export class WebRenderTargetRegistry {
         return WebRenderTargetRegistry.targets[id];
     }
 
-    private static createRenderTarget(canvas: HTMLCanvasElement | OffscreenCanvas, modes: BrowserRenderingMode[]): WebRenderTarget {
+    private static createRenderTarget(canvas: HTMLCanvasElement | OffscreenCanvas, modes: BrowserRenderingMode[], preferHdr: boolean): WebRenderTarget {
         for (const mode of modes) {
             try {
                 if (mode === BrowserRenderingMode.Software2D) { return new SoftwareRenderTarget(canvas); }
-                return new WebGlRenderTarget(canvas, mode);
+                return new WebGlRenderTarget(canvas, mode, preferHdr);
             } catch (e) {
                 let message = "";
                 if (e instanceof Error) { message = ": " + e.message; }

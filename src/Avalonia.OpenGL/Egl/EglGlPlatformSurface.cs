@@ -13,6 +13,18 @@ namespace Avalonia.OpenGL.Egl
             PixelSize Size { get; }
             double Scaling { get; }
         }
+
+        /// <summary>
+        /// Optionally supplies the color volume preferred for a window surface.
+        /// </summary>
+        [PrivateApi]
+        public interface IEglWindowGlPlatformSurfaceInfoWithColorVolume : IEglWindowGlPlatformSurfaceInfo
+        {
+            /// <summary>
+            /// Gets the current preferred color volume, or null when it can't be reported.
+            /// </summary>
+            PlatformSurfaceColorVolume? PreferredColorVolume { get; }
+        }
         
         [PrivateApi]
         public interface IEglWindowGlPlatformSurfaceInfoWithWaitPolicy : IEglWindowGlPlatformSurfaceInfo
@@ -29,6 +41,9 @@ namespace Avalonia.OpenGL.Egl
 
         public override IGlPlatformSurfaceRenderTarget CreateGlRenderTarget(IGlContext context)
         {
+            if (_info.Handle == IntPtr.Zero)
+                throw new RenderTargetNotReadyException();
+
             var eglContext = (EglContext)context;
             
             var glSurface = eglContext.Display.CreateWindowSurface(_info.Handle);
@@ -53,12 +68,22 @@ namespace Avalonia.OpenGL.Egl
 
             protected override bool SkipWaits { get; }
 
+            protected override PlatformSurfaceColorVolume? PreferredColorVolume =>
+                (_info as IEglWindowGlPlatformSurfaceInfoWithColorVolume)?.PreferredColorVolume;
+
+            public override PlatformRenderTargetState State => _info.Handle == IntPtr.Zero
+                ? PlatformRenderTargetState.NotReadyTryLater
+                : base.State;
+
             public override void Dispose() => _glSurface?.Dispose();
 
             public override IGlPlatformSurfaceRenderingSession BeginDrawCore(IRenderTarget.RenderTargetSceneInfo sceneInfo)
             {
                 // TODO: use expectedPixelSize
                 var handle = _info.Handle;
+                if (handle == IntPtr.Zero)
+                    throw new RenderTargetNotReadyException();
+
                 var size = _info.Size;
                 if (size != _currentSize
                     || _handle != handle
