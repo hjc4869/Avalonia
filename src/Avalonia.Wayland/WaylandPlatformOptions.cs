@@ -75,6 +75,14 @@ public class WaylandPlatformOptions
     public bool? UseDmabufSwapchain { get; set; }
 
     /// <summary>
+    /// Opts in to rendering into a wide gamut or extended range surface. Requires the compositor to
+    /// support <c>wp_color_manager_v1</c> and the driver to expose a matching high bit depth EGL
+    /// config; when either is missing the backend silently falls back to the standard 8 bit sRGB
+    /// surface, so enabling this is always safe.
+    /// </summary>
+    public WaylandColorMode ColorMode { get; set; } = WaylandColorMode.Standard;
+
+    /// <summary>
     /// If this option is set to true, a GMainLoop and GSource based dispatcher implementation will be used for the
     /// UI thread instead of the default managed one.
     /// Use this if you need to use GLib-based libraries on the main thread.
@@ -90,4 +98,32 @@ public class WaylandPlatformOptions
     /// Only used when <see cref="UseGLibMainLoop"/> is enabled.
     /// </summary>
     public Action<Exception>? ExternalGLibMainLoopExceptionLogger { get; set; }
+}
+
+/// <summary>
+/// The color space Avalonia renders its Wayland surfaces in.
+/// </summary>
+public enum WaylandColorMode
+{
+    /// <summary>
+    /// Non color managed 8 bit sRGB. This is the default and matches Avalonia's behaviour on every
+    /// other backend.
+    /// </summary>
+    Standard,
+
+    /// <summary>
+    /// A wide gamut surface (Display P3, falling back to Rec. 2020) with a 2.2 gamma transfer
+    /// function. Existing controls keep their appearance because Skia color converts their sRGB
+    /// colors into the wider space, while custom drawing operations can emit colors outside of the
+    /// sRGB gamut.
+    /// </summary>
+    WideColorGamut,
+
+    /// <summary>
+    /// A 16 bit float scRGB surface: sRGB primaries with an extended linear transfer function, so
+    /// channel values below 0 and above 1 are meaningful. This is the HDR-capable mode. Note that
+    /// blending and gradient interpolation happen in linear light, which visibly differs from
+    /// Avalonia's historical sRGB-encoded blending.
+    /// </summary>
+    ExtendedLinear
 }

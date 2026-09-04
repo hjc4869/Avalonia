@@ -28,6 +28,7 @@ namespace Avalonia.Rendering.Composition.Server
         private IRenderTarget? _renderTarget;
         private PixelSize _layerSize;
         private IDrawingContextLayerImpl? _layer;
+        private PlatformSurfaceColorVolume? _layerColorVolume;
         private bool _updateRequested;
         private bool _redrawRequested;
         private bool _fullRedrawRequested;
@@ -152,6 +153,7 @@ namespace Avalonia.Rendering.Composition.Server
             {
                 _layer?.Dispose();
                 _layer = null;
+                _layerColorVolume = null;
                 _renderTarget.Dispose();
                 _renderTarget = null;
                 _redrawRequested = true;
@@ -221,19 +223,29 @@ namespace Avalonia.Rendering.Composition.Server
             using (var renderTiming = Diagnostic.BeginCompositorRenderPass())
             {
                 var fullRedraw = false;
+
+                if (_layer != null && _layerColorVolume != properties.PreferredColorVolume)
+                {
+                    _layer.Dispose();
+                    _layer = null;
+                    _layerColorVolume = null;
+                }
                 
                 if(needLayer && (PixelSize != _layerSize || _layer == null || _layer.IsCorrupted))
                 {
                     _layer?.Dispose();
                     _layer = null;
+                    _layerColorVolume = null;
                     _layer = renderTargetContext.CreateLayer(PixelSize);
                     _layerSize = PixelSize;
+                    _layerColorVolume = properties.PreferredColorVolume;
                     fullRedraw = true;
                 }
                 else if (!needLayer)
                 {
                     _layer?.Dispose();
                     _layer = null;
+                    _layerColorVolume = null;
                 }
 
                 if (_fullRedrawRequested || (!needLayer && !properties.PreviousFrameIsRetained))
@@ -329,6 +341,7 @@ namespace Avalonia.Rendering.Composition.Server
                     {
                         _layer.Dispose();
                         _layer = null;
+                        _layerColorVolume = null;
                     }
                     _renderTarget?.Dispose();
                     _renderTarget = null;
@@ -340,6 +353,7 @@ namespace Avalonia.Rendering.Composition.Server
                 // Set to null for now
                 // TODO: Check per-platform to make sure that it's safe to dispose anyay
                 _layer = null;
+                _layerColorVolume = null;
                 _renderTarget = null;
                 
             }

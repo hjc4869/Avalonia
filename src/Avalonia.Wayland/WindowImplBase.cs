@@ -25,7 +25,7 @@ namespace Avalonia.Wayland;
 /// callbacks and no-op platform methods that Wayland doesn't support
 /// (Move, SetTopmost, Activate, PointToClient/Screen, etc.).
 /// </summary>
-internal abstract partial class WindowBaseImpl : IWindowBaseImpl
+internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfaceColorVolumeFeature
 {
     protected WaylandWorkerClient Client { get; }
     protected IInputRoot? InputRoot { get; private set; }
@@ -154,6 +154,20 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl
     protected void PostToUiThread(Action action) =>
         Dispatcher.UIThread.Post(action, DispatcherPriority.Input);
 
+    public PlatformSurfaceColorVolume? PreferredColorVolume { get; private set; }
+
+    public event EventHandler? PreferredColorVolumeChanged;
+
+    private void UpdatePreferredColorVolume(PlatformSurfaceColorVolume? colorVolume)
+    {
+        if (PreferredColorVolume == colorVolume)
+            return;
+        PreferredColorVolume = colorVolume;
+        PreferredColorVolumeChanged?.Invoke(this, EventArgs.Empty);
+        // The frame currently on screen was rendered against the old luminances.
+        Paint?.Invoke(new Rect(ClientSize));
+    }
+
     public virtual object? TryGetFeature(Type featureType)
     {
         if (featureType == typeof(IScreenImpl))
@@ -162,6 +176,8 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl
             return AvaloniaLocator.Current.GetRequiredService<IClipboard>();
         if (featureType == typeof(ILauncher))
             return new BclLauncher();
+        if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            return this;
         return null;
     }
 
@@ -261,6 +277,13 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl
             if (IsDisposed)
                 return;
             Parent.CurrentOutputIds = outputIds;
+        }
+
+        public virtual void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? colorVolume)
+        {
+            if (IsDisposed)
+                return;
+            Parent.UpdatePreferredColorVolume(colorVolume);
         }
     }
 }

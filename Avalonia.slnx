@@ -89,6 +89,7 @@
     <Project Path="samples/SingleProjectSandbox/SingleProjectSandbox.csproj" />
     <Project Path="samples/TextTestApp/TextTestApp.csproj" />
     <Project Path="samples/VirtualizationDemo/VirtualizationDemo.csproj" />
+    <Project Path="samples/WideColorGamutDemo/WideColorGamutDemo.csproj" />
     <Project Path="samples/WinUIEmbedSample/WinUIEmbedSample.csproj">
       <Platform Project="x64" />
       <Deploy />
@@ -130,6 +131,9 @@
     <File Path="NuGet.Config" />
     <File Path="readme.md" />
   </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Skia/" />
+  <Folder Name="/src/tools/" />
   <Folder Name="/Targets/">
     <File Path="build/AnalyzerProject.targets" />
     <File Path="build/BuildTargets.targets" />

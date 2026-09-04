@@ -9,6 +9,7 @@ using Avalonia.Platform.Surfaces;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Transient;
 using Avalonia.Wayland.Server.Transient.Rendering;
+using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -25,6 +26,8 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     public WlSurface? WlSurface { get; private set; }
     protected WpFractionalScaleV1? FractionalScale { get; private set; }
     protected WpViewport? Viewport { get; private set; }
+    private WpColorManagementSurfaceV1? _colorSurface;
+    private WaylandColorVolumeFeedback? _colorVolumeFeedback;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -188,10 +191,36 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             Viewport = globals.Viewporter!.GetViewport(WlSurface);
         }
 
-        // Re-apply the cached input region on (re)connect. It's double-buffered
-        // state, promoted by the next commit — which happens before the surface
-        // can receive any input.
-        ApplyInputRegion();
+        _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
+        _colorVolumeFeedback = globals.ColorManager?.TryTrackColorVolume(WlSurface, SetPreferredColorVolume);
+
+    // Re-apply the cached input region on (re)connect. It's double-buffered
+    // state, promoted by the next commit — which happens before the surface
+    // can receive any input.
+    ApplyInputRegion();
+    }
+
+    /// <summary>
+    /// The color volume the compositor currently prefers for this surface, or <c>null</c> when it
+    /// can't be determined. Read on the Wayland thread when a render session begins.
+    /// </summary>
+    internal PlatformSurfaceColorVolume? PreferredColorVolume { get; private set; }
+
+    private void SetPreferredColorVolume(PlatformSurfaceColorVolume? volume)
+    {
+        if (PreferredColorVolume == volume)
+            return;
+        PreferredColorVolume = volume;
+        // The next frame has to be rendered against the new luminances.
+        Worker.WakeupRenderLoop();
+        OnPreferredColorVolumeChanged(volume);
+    }
+
+    /// <summary>
+    /// Called on the Wayland thread when the preferred color volume changes.
+    /// </summary>
+    protected virtual void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume)
+    {
     }
 
     private IPlatformRenderSurface[]? _renderSurfaces;
@@ -379,6 +408,19 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             FractionalScale.Dispose();
             FractionalScale = null;
         }
+        // color-management-v1 has the same ordering requirement.
+        if (_colorVolumeFeedback != null)
+        {
+            _colorVolumeFeedback.Dispose();
+            _colorVolumeFeedback = null;
+        }
+        SetPreferredColorVolume(null);
+        if (_colorSurface != null)
+        {
+            _colorSurface.Destroy();
+            _colorSurface.Dispose();
+            _colorSurface = null;
+        }
         WlSurface?.Destroy();
         WlSurface = null;
         Globals = null;
@@ -451,6 +493,9 @@ class WXdgShellSurface : WSurface, IWXdgShellSurface
     }
 
     protected override void OnScaleChanged(double scale) => EventSink.OnScaleChanged(scale);
+
+    protected override void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume) =>
+        EventSink.OnPreferredColorVolumeChanged(volume);
 
     protected override void OnOutputsChanged()
     {
