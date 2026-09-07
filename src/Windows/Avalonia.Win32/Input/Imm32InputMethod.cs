@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using Avalonia.Controls.Platform;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
 using Avalonia.Input.TextInput;
@@ -105,6 +106,9 @@ namespace Avalonia.Win32.Input
         {
             DisableImm();
 
+            if (Client != null)
+                Client.InputPaneActivationRequested -= OnInputPaneActivationRequested;
+
             Hwnd = IntPtr.Zero;
             _parent = null;
             Client = null;
@@ -154,6 +158,7 @@ namespace Avalonia.Win32.Input
         {
             if(Client != null)
             {
+                Client.InputPaneActivationRequested -= OnInputPaneActivationRequested;
                 Composition = null;
                 _compositionCursorPosition = null;
 
@@ -162,8 +167,14 @@ namespace Avalonia.Win32.Input
 
             Client = client;
 
+            if (Client != null)
+                Client.InputPaneActivationRequested += OnInputPaneActivationRequested;
+
             Dispatcher.UIThread.Post(() =>
             {
+                if (Hwnd == IntPtr.Zero)
+                    return;
+
                 if (IsActive)
                 {
                     EnableImm();
@@ -178,8 +189,27 @@ namespace Avalonia.Win32.Input
 
                     DisableImm();
                 }
+
+                UpdateInputPaneVisibility();
             });
         }
+
+        private void OnInputPaneActivationRequested(object? sender, EventArgs e)
+        {
+            if (IsActive)
+                UpdateInputPaneVisibility();
+        }
+
+        private void UpdateInputPaneVisibility()
+        {
+            // The input method is shared by all windows. Use the current client and HWND
+            // at dispatch time, and never change the pane on behalf of an inactive window.
+            if (Hwnd != IntPtr.Zero && GetActiveWindow() == Hwnd)
+                SetInputPaneVisible(IsActive);
+        }
+
+        protected virtual void SetInputPaneVisible(bool visible)
+            => (_parent?.TryGetFeature(typeof(IInputPane)) as WindowsInputPane)?.SetVisible(visible);
 
         public void SetCursorRect(Rect rect)
         {
