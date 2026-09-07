@@ -172,6 +172,21 @@ interface IInspectable : IUnknown
     HRESULT GetTrustLevel([out] TrustLevel * trustLevel);
 }
 
+// Desktop InputPane access must use an HWND, not GetForCurrentView.
+[uuid(75CF2C57-9195-4931-8332-F0B409E916AF)]
+interface IInputPaneInterop : IInspectable
+{
+    HRESULT GetForWindow(HWND appWindow, GUID* riid, [out] [retval] void** inputPane);
+}
+
+[uuid(8A6B3F26-7090-4793-944C-C3F2CDE26276)]
+interface IInputPane2 : IInspectable
+{
+    // WinRT Boolean is one byte, unlike Win32 BOOL.
+    HRESULT TryShow([out] [retval] BYTE* result);
+    HRESULT TryHide([out] [retval] BYTE* result);
+}
+
 enum PropertyType
 {
     Empty            = 0,

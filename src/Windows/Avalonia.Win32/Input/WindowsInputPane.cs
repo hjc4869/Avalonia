@@ -1,5 +1,6 @@
 ﻿using System;
 using Avalonia.Controls.Platform;
+using Avalonia.Logging;
 using Avalonia.MicroCom;
 using Avalonia.Win32.Interop;
 using Avalonia.Win32.Win32Com;
@@ -20,6 +21,8 @@ internal unsafe class WindowsInputPane : InputPaneBase, IDisposable
 
     private WindowImpl _windowImpl;
     private IFrameworkInputPane? _inputPane;
+    private IInputPane2? _inputPane2;
+    private bool _inputPane2Initialized;
     private readonly uint _cookie;
     private bool _disposed;
 
@@ -50,8 +53,49 @@ internal unsafe class WindowsInputPane : InputPaneBase, IDisposable
         return null;
     }
 
+    internal void SetVisible(bool visible)
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            if (!_inputPane2Initialized)
+            {
+                _inputPane2Initialized = true;
+
+                // Older Windows versions and stripped-down installations may not support
+                // either TryShow or the desktop interop interface.
+                if (!WinRTApiInformation.IsMethodPresent("Windows.UI.ViewManagement.InputPane", "TryShow"))
+                    return;
+
+                using var interop = NativeWinRTMethods.CreateActivationFactory<IInputPaneInterop>(
+                    "Windows.UI.ViewManagement.InputPane");
+                var iid = MicroComRuntime.GetGuidFor(typeof(IInputPane2));
+                _inputPane2 = MicroComRuntime.CreateProxyFor<IInputPane2>(
+                    (IntPtr)interop.GetForWindow(_windowImpl.Handle.Handle, &iid), true);
+            }
+
+            // These are best-effort requests. Let Windows decide whether a touch keyboard
+            // is needed (for example, a hardware keyboard may already be available).
+            // Showing/Hiding notifications, not the return value, update IInputPane state.
+            if (visible)
+                _inputPane2?.TryShow();
+            else
+                _inputPane2?.TryHide();
+        }
+        catch (Exception e)
+        {
+            Logger.TryGet(LogEventLevel.Debug, LogArea.Win32Platform)?.Log(this,
+                "Unable to change input pane visibility: {0}", e);
+        }
+    }
+
     private void OnStateChanged(bool showing, UnmanagedMethods.RECT? prcInputPaneScreenLocation)
     {
+        if (_disposed)
+            return;
+
         var oldState = (OccludedRect, State);
         OccludedRect = prcInputPaneScreenLocation.HasValue
             ? ScreenRectToClient(prcInputPaneScreenLocation.Value)
@@ -77,6 +121,8 @@ internal unsafe class WindowsInputPane : InputPaneBase, IDisposable
             return; 
         _disposed = true;
         _windowImpl = null!;
+        _inputPane2?.Dispose();
+        _inputPane2 = null;
         if (_inputPane is not null)
         {
             if (_cookie != 0)
