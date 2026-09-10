@@ -1,0 +1,130 @@
+@clr-namespace Avalonia.Win32.Input
+@clr-access internal
+@clr-map HWND IntPtr
+@clr-map HANDLE IntPtr
+@clr-map RECT Avalonia.Win32.Interop.UnmanagedMethods.RECT
+@clr-map MSG Avalonia.Win32.Interop.UnmanagedMethods.MSG
+@clr-map REFIID System.Guid*
+
+enum DIRECTMANIPULATION_STATUS
+{
+    BUILDING = 0,
+    ENABLED = 1,
+    DISABLED = 2,
+    RUNNING = 3,
+    INERTIA = 4,
+    READY = 5,
+    SUSPENDED = 6
+}
+
+[flags]
+enum DIRECTMANIPULATION_CONFIGURATION
+{
+    INTERACTION = 0x1,
+    TRANSLATION_X = 0x2,
+    TRANSLATION_Y = 0x4,
+    SCALING = 0x10,
+    TRANSLATION_INERTIA = 0x20
+}
+
+[flags]
+enum DIRECTMANIPULATION_VIEWPORT_OPTIONS
+{
+    MANUALUPDATE = 0x2,
+    EXPLICITHITTEST = 0x8,
+    DISABLEPIXELSNAPPING = 0x10
+}
+
+enum DIRECTMANIPULATION_INTERACTION_TYPE
+{
+    BEGIN = 0,
+    END = 100
+}
+
+[uuid(FBF5D3B4-70C7-4163-9322-5A6F660D6FBC)]
+interface IDirectManipulationManager : IUnknown
+{
+    int Activate(HWND window);
+    int Deactivate(HWND window);
+    HRESULT RegisterHitTestTarget(HWND window, HWND hitTestWindow, uint type);
+    HRESULT ProcessInput(MSG* message, [out] int* handled);
+    int GetUpdateManager(REFIID riid, [out] void** manager);
+    int CreateViewport(void* frameInfo, HWND window, REFIID riid, [out] void** viewport);
+    HRESULT CreateContent(void* frameInfo, REFIID clsid, REFIID riid, [out, retval] void** content);
+}
+
+[uuid(28B85A3D-60A0-48BD-9BA1-5CE8D9EA3A6D)]
+interface IDirectManipulationViewport : IUnknown
+{
+    int Enable();
+    int Disable();
+    int SetContact(uint pointerId);
+    HRESULT ReleaseContact(uint pointerId);
+    HRESULT ReleaseAllContacts();
+    int GetStatus([out] DIRECTMANIPULATION_STATUS* status);
+    HRESULT GetTag(REFIID riid, [out] void** tag, [out] uint* id);
+    HRESULT SetTag(IUnknown* tag, uint id);
+    int GetViewportRect([out] RECT* viewport);
+    int SetViewportRect(RECT* viewport);
+    int ZoomToRect(float left, float top, float right, float bottom, int animate);
+    HRESULT SetViewportTransform(float* matrix, uint pointCount);
+    HRESULT SyncDisplayTransform(float* matrix, uint pointCount);
+    HRESULT GetPrimaryContent(REFIID riid, [out, retval] void** content);
+    HRESULT AddContent(IDirectManipulationContent* content);
+    HRESULT RemoveContent(IDirectManipulationContent* content);
+    int SetViewportOptions(DIRECTMANIPULATION_VIEWPORT_OPTIONS options);
+    HRESULT AddConfiguration(DIRECTMANIPULATION_CONFIGURATION configuration);
+    HRESULT RemoveConfiguration(DIRECTMANIPULATION_CONFIGURATION configuration);
+    int ActivateConfiguration(DIRECTMANIPULATION_CONFIGURATION configuration);
+    HRESULT SetManualGesture(uint configuration);
+    HRESULT SetChaining(uint enabledTypes);
+    int AddEventHandler(HWND window, IDirectManipulationViewportEventHandler* eventHandler, [out] uint* cookie);
+    int RemoveEventHandler(uint cookie);
+    HRESULT SetInputMode(uint mode);
+    HRESULT SetUpdateMode(uint mode);
+    HRESULT Stop();
+    int Abandon();
+}
+
+[uuid(923CCAAC-61E1-4385-B726-017AF189882A)]
+interface IDirectManipulationViewport2 : IDirectManipulationViewport
+{
+    HRESULT AddBehavior(IUnknown* behavior, [out, retval] uint* cookie);
+    HRESULT RemoveBehavior(uint cookie);
+    HRESULT RemoveAllBehaviors();
+}
+
+[uuid(E43F45B8-42B4-403E-B1F2-273B8F510830)]
+interface IDirectManipulationInteractionEventHandler : IUnknown
+{
+    HRESULT OnInteraction(IDirectManipulationViewport2* viewport, DIRECTMANIPULATION_INTERACTION_TYPE interaction);
+}
+
+[uuid(952121DA-D69F-45F9-B0F9-F23944321A6D)]
+interface IDirectManipulationViewportEventHandler : IUnknown
+{
+    HRESULT OnViewportStatusChanged(IDirectManipulationViewport* viewport, DIRECTMANIPULATION_STATUS current, DIRECTMANIPULATION_STATUS previous);
+    HRESULT OnViewportUpdated(IDirectManipulationViewport* viewport);
+    HRESULT OnContentUpdated(IDirectManipulationViewport* viewport, IDirectManipulationContent* content);
+}
+
+[uuid(B89962CB-3D89-442B-BB58-5098FA0F9F16)]
+interface IDirectManipulationContent : IUnknown
+{
+    HRESULT GetContentRect([out] RECT* contentSize);
+    HRESULT SetContentRect(RECT* contentSize);
+    HRESULT GetViewport(REFIID riid, [out, retval] void** viewport);
+    HRESULT GetTag(REFIID riid, [out] void** tag, [out] uint* id);
+    HRESULT SetTag(IUnknown* tag, uint id);
+    HRESULT GetOutputTransform([out] float* matrix, uint pointCount);
+    int GetContentTransform([out] float* matrix, uint pointCount);
+    HRESULT SyncContentTransform(float* matrix, uint pointCount);
+}
+
+[uuid(B0AE62FD-BE34-46E7-9CAA-D361FACBB9CC)]
+interface IDirectManipulationUpdateManager : IUnknown
+{
+    HRESULT RegisterWaitHandleCallback(HANDLE handle, IUnknown* eventHandler, [out] uint* cookie);
+    HRESULT UnregisterWaitHandleCallback(uint cookie);
+    int Update(void* frameInfo);
+}
