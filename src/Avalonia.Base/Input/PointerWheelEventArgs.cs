@@ -9,6 +9,11 @@ namespace Avalonia.Input
         /// </summary>
         public bool IsTouchpad { get; init; }
 
+        /// <summary>
+        /// Gets the native touchpad lifecycle phase. Phase-only events can have a zero delta.
+        /// </summary>
+        public TouchpadGesturePhase GesturePhase { get; init; }
+
         public PointerWheelEventArgs(object? source, IPointer pointer, Visual rootVisual,
             Point rootVisualPosition, ulong timestamp,
             PointerPointProperties properties, KeyModifiers modifiers, Vector delta)
