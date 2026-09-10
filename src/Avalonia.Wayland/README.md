@@ -114,6 +114,11 @@ Finger scrolling sets `PointerWheelEventArgs.IsTouchpad` while retaining Avaloni
 One wheel unit corresponds to 50 DIPs in `ScrollContentPresenter`; controls can use the flag to
 distinguish touchpad panning from mouse-wheel actions.
 
+`PointerWheelEventArgs.GesturePhase` identifies the beginning and updates of finger scrolling.
+The final active axis's `wl_pointer.axis_stop` emits an `Ended` event with zero delta, so controls
+can settle immediately on release. Stopping only one axis keeps the sequence active. Leaving the
+surface or starting a pinch cancels an active scroll sequence. Mouse wheel events use `None`.
+
 Native pinch input uses `zwp_pointer_gestures_v1` versions 1 through 2. Each pointer owns a pinch
 listener, and gestures target the surface supplied by the begin event. The absolute protocol scale
 is converted into incremental `PointerTouchPadGestureMagnify` deltas: multiplying the current scale

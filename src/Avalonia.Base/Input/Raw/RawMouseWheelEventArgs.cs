@@ -20,5 +20,7 @@ namespace Avalonia.Input.Raw
         public Vector Delta { get; private set; }
 
         public bool IsTouchpad { get; set; }
+
+        public TouchpadGesturePhase GesturePhase { get; set; }
     }
 }
