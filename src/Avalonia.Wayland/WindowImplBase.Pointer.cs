@@ -42,12 +42,12 @@ partial class WindowBaseImpl
         }
 
         void IWSurfaceEventSink.OnPointerAxis(ulong timestamp, Vector delta, RawInputModifiers modifiers,
-            Point position, bool isTouchpad)
+            Point position, bool isTouchpad, TouchpadGesturePhase gesturePhase)
         {
             if (InputRoot is null)
                 return;
             ScheduleInput(new RawMouseWheelEventArgs(Mouse, timestamp, InputRoot,
-                position, delta, modifiers) { IsTouchpad = isTouchpad });
+                position, delta, modifiers) { IsTouchpad = isTouchpad, GesturePhase = gesturePhase });
         }
 
         void IWSurfaceEventSink.OnPointerGesture(ulong timestamp, RawPointerEventType type, Vector delta,

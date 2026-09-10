@@ -106,7 +106,7 @@ namespace Avalonia.Input
                     break;
                 case RawPointerEventType.Wheel:
                     var wheel = (RawMouseWheelEventArgs)e;
-                    e.Handled = MouseWheel(mouse, e.Timestamp, e.Root, e.Position, props, wheel.Delta, keyModifiers, e.InputHitTestResult.firstEnabledAncestor, wheel.IsTouchpad);
+                    e.Handled = MouseWheel(mouse, e.Timestamp, e.Root, e.Position, props, wheel.Delta, keyModifiers, e.InputHitTestResult.firstEnabledAncestor, wheel.IsTouchpad, wheel.GesturePhase);
                     break;
                 case RawPointerEventType.Magnify:
                     e.Handled = GestureMagnify(mouse, e.Timestamp, e.Root, e.Position, props, ((RawPointerGestureEventArgs)e).Delta, keyModifiers, e.InputHitTestResult.firstEnabledAncestor);
@@ -230,7 +230,7 @@ namespace Avalonia.Input
 
         private bool MouseWheel(IMouseDevice device, ulong timestamp, IInputRoot root, Point p,
             PointerPointProperties props,
-            Vector delta, KeyModifiers inputModifiers, IInputElement? hitTest, bool isTouchpad)
+            Vector delta, KeyModifiers inputModifiers, IInputElement? hitTest, bool isTouchpad, TouchpadGesturePhase gesturePhase)
         {
             var rawDelta = delta;
             device = device ?? throw new ArgumentNullException(nameof(device));
@@ -242,7 +242,8 @@ namespace Avalonia.Input
             {
                 var e = new PointerWheelEventArgs(source, _pointer, root.RootElement, p, timestamp, props, inputModifiers, delta)
                 {
-                    IsTouchpad = isTouchpad
+                    IsTouchpad = isTouchpad,
+                    GesturePhase = gesturePhase
                 };
 
                 source?.RaiseEvent(e);

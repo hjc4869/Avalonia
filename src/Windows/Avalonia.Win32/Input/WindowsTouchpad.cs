@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Avalonia.Input;
 using Avalonia.Logging;
 using Avalonia.MicroCom;
 using Avalonia.Threading;
@@ -11,7 +12,7 @@ namespace Avalonia.Win32.Input;
 internal sealed unsafe class WindowsTouchpad : IDisposable
 {
     private readonly IntPtr _hwnd;
-    private readonly Action<double, Vector, PixelPoint> _onGesture;
+    private readonly Action<double, Vector, PixelPoint, TouchpadGesturePhase> _onGesture;
     private readonly DispatcherTimer _timer;
     private IDirectManipulationManager? _manager;
     private IDirectManipulationUpdateManager? _updateManager;
@@ -22,11 +23,12 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
     private Vector _translation;
     private DIRECTMANIPULATION_STATUS _status;
     private bool _interacting;
+    private bool _scrollActive;
     private bool _resetting;
     private bool _enabled;
     private bool _disposed;
 
-    private WindowsTouchpad(IntPtr hwnd, Action<double, Vector, PixelPoint> onGesture)
+    private WindowsTouchpad(IntPtr hwnd, Action<double, Vector, PixelPoint, TouchpadGesturePhase> onGesture)
     {
         _hwnd = hwnd;
         _onGesture = onGesture;
@@ -37,7 +39,7 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
         _timer.Tick += OnTick;
     }
 
-    public static WindowsTouchpad? TryCreate(IntPtr hwnd, Action<double, Vector, PixelPoint> onGesture)
+    public static WindowsTouchpad? TryCreate(IntPtr hwnd, Action<double, Vector, PixelPoint, TouchpadGesturePhase> onGesture)
     {
         if (Win32Platform.WindowsVersion < PlatformConstants.Windows8_1)
             return null;
@@ -114,6 +116,7 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
             _position = new PixelPoint(position.X, position.Y);
             _interacting = true;
             ThrowIfFailed(_viewport.SetContact(pointerId), nameof(IDirectManipulationViewport.SetContact));
+            BeginScroll();
             UpdateTimer();
             return true;
         }
@@ -162,6 +165,9 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
             else
             {
                 _interacting = false;
+                EndScroll(TouchpadGesturePhase.Cancelled);
+                if (_disposed)
+                    return;
                 ThrowIfFailed(_viewport.Disable(), nameof(IDirectManipulationViewport.Disable));
                 _timer.Stop();
             }
@@ -214,7 +220,17 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
         {
             _interacting = false;
             _resetting = false;
+            EndScroll(TouchpadGesturePhase.Cancelled);
         }
+        else if (!_resetting)
+        {
+            if (current == DIRECTMANIPULATION_STATUS.RUNNING)
+                BeginScroll();
+            else if (current is DIRECTMANIPULATION_STATUS.INERTIA or DIRECTMANIPULATION_STATUS.READY)
+                EndScroll(TouchpadGesturePhase.Ended);
+        }
+        if (_disposed)
+            return;
         if (current == DIRECTMANIPULATION_STATUS.READY)
         {
             if (_resetting)
@@ -238,6 +254,24 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
             }
         }
         UpdateTimer();
+    }
+
+    private void BeginScroll()
+    {
+        if (_scrollActive || _disposed || !_enabled || _resetting)
+            return;
+
+        _scrollActive = true;
+        _onGesture(0, default, _position, TouchpadGesturePhase.Began);
+    }
+
+    private void EndScroll(TouchpadGesturePhase phase)
+    {
+        if (!_scrollActive)
+            return;
+
+        _scrollActive = false;
+        _onGesture(0, default, _position, phase);
     }
 
     internal static (double Magnification, Vector Translation) GetGestureDelta(
@@ -274,7 +308,8 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
         _scale = scale;
         _translation = translation;
         if (delta.Magnification != 0 || delta.Translation != default)
-            _onGesture(delta.Magnification, delta.Translation, _position);
+            _onGesture(delta.Magnification, delta.Translation, _position,
+                _scrollActive ? TouchpadGesturePhase.Changed : TouchpadGesturePhase.Inertia);
     }
 
     private void OnFailure(COMException exception)
@@ -304,6 +339,7 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
 
         _disposed = true;
         _timer.Stop();
+        EndScroll(TouchpadGesturePhase.Cancelled);
         if (_viewport != null)
         {
             ReleaseNative(_viewport.Disable, nameof(IDirectManipulationViewport.Disable));
@@ -341,6 +377,10 @@ internal sealed unsafe class WindowsTouchpad : IDisposable
                 DIRECTMANIPULATION_INTERACTION_TYPE.BEGIN or DIRECTMANIPULATION_INTERACTION_TYPE.END)
             {
                 owner._interacting = interaction == DIRECTMANIPULATION_INTERACTION_TYPE.BEGIN;
+                if (owner._interacting)
+                    owner.BeginScroll();
+                else
+                    owner.EndScroll(TouchpadGesturePhase.Ended);
                 owner.UpdateTimer();
             }
         }

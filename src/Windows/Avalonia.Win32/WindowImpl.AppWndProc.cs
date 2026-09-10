@@ -20,7 +20,8 @@ namespace Avalonia.Win32
     {
         private bool _killFocusRequested;
 
-        private void OnTouchpadGesture(double magnification, Vector translation, PixelPoint origin)
+        private void OnTouchpadGesture(double magnification, Vector translation, PixelPoint origin,
+            TouchpadGesturePhase phase)
         {
             if (_owner is not { } root || Input is not { } input)
                 return;
@@ -31,9 +32,10 @@ namespace Avalonia.Win32
             if (magnification != 0)
                 input(new RawPointerGestureEventArgs(_mouseDevice, timestamp, root,
                     RawPointerEventType.Magnify, position, new Vector(magnification, magnification), modifiers));
-            if (_hwnd != IntPtr.Zero && translation != default)
+            if (_hwnd != IntPtr.Zero && (translation != default ||
+                phase is TouchpadGesturePhase.Began or TouchpadGesturePhase.Ended or TouchpadGesturePhase.Cancelled))
                 input(new RawMouseWheelEventArgs(_mouseDevice, timestamp, root,
-                    position, translation / (50 * RenderScaling), modifiers) { IsTouchpad = true });
+                    position, translation / (50 * RenderScaling), modifiers) { IsTouchpad = true, GesturePhase = phase });
         }
 
         [SuppressMessage("Microsoft.StyleCop.CSharp.NamingRules", "SA1305:FieldNamesMustNotUseHungarianNotation",
