@@ -23,7 +23,8 @@ internal interface IWSurfaceEventSink
     void OnPointerLeave(uint serial);
     void OnPointerMotion(ulong timestamp, Point position, RawInputModifiers modifiers);
     void OnPointerButton(ulong timestamp, uint serial, RawPointerEventType type, RawInputModifiers modifiers, Point position, object? platformCookie);
-    void OnPointerAxis(ulong timestamp, Vector delta, RawInputModifiers modifiers, Point position, bool isTouchpad);
+    void OnPointerAxis(ulong timestamp, Vector delta, RawInputModifiers modifiers, Point position, bool isTouchpad,
+        TouchpadGesturePhase gesturePhase);
     void OnPointerGesture(ulong timestamp, RawPointerEventType type, Vector delta, RawInputModifiers modifiers, Point position);
 
     void OnTouchDown(ulong timestamp, int touchId, Point position, object? platformCookie);
