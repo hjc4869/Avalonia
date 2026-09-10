@@ -14,6 +14,7 @@ using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
 using NWayland.Protocols.Plasma.Appmenu;
 using NWayland.Protocols.Plasma.ServerDecorationPalette;
+using NWayland.Protocols.PointerGesturesUnstableV1;
 using NWayland.Protocols.TextInputUnstableV3;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -109,11 +110,16 @@ class WaylandGlobals
             {
                 p.OnSeatGlobal(name, version);
             }
+            else if (@interface == ZwpPointerGesturesV1.ProxyType.Interface.Name)
+            {
+                p.InputDispatcher.OnPointerGesturesAdded(eventSender, name, version);
+            }
         }
 
         protected override void GlobalRemove(WlRegistry eventSender, uint name)
         {
             p.InputDispatcher.OnSeatRemoved(name);
+            p.InputDispatcher.OnPointerGesturesRemoved(name);
             p.GlobalRemoved?.Invoke(name);
         }
     }

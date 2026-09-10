@@ -108,6 +108,19 @@ parametric description with the default sRGB luminances puts the reference white
 `EGL_EXT_gl_colorspace_scrgb_linear`, so it is preferred and `create_windows_scrgb` is only a
 fallback.
 
+## Touchpad input
+
+Finger scrolling sets `PointerWheelEventArgs.IsTouchpad` while retaining Avalonia's wheel-delta units.
+One wheel unit corresponds to 50 DIPs in `ScrollContentPresenter`; controls can use the flag to
+distinguish touchpad panning from mouse-wheel actions.
+
+Native pinch input uses `zwp_pointer_gestures_v1` versions 1 through 2. Each pointer owns a pinch
+listener, and gestures target the surface supplied by the begin event. The absolute protocol scale
+is converted into incremental `PointerTouchPadGestureMagnify` deltas: multiplying the current scale
+by `1 + Delta.Y` applies one update. Logical-center movement produces touchpad-marked wheel events,
+and rotation produces `PointerTouchPadGestureRotate` deltas in clockwise degrees. Ending or
+cancelling a pinch clears its target and scale state.
+
 ## Protocol docs
 
 Do NOT assume things about Wayland protocols. Those could be rather non-intuitive. Always check what the protocol says
