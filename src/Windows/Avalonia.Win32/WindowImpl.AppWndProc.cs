@@ -20,6 +20,22 @@ namespace Avalonia.Win32
     {
         private bool _killFocusRequested;
 
+        private void OnTouchpadGesture(double magnification, Vector translation, PixelPoint origin)
+        {
+            if (_owner is not { } root || Input is not { } input)
+                return;
+
+            var timestamp = unchecked((uint)Environment.TickCount);
+            var position = origin.ToPoint(RenderScaling);
+            var modifiers = WindowsKeyboardDevice.Instance.Modifiers;
+            if (magnification != 0)
+                input(new RawPointerGestureEventArgs(_mouseDevice, timestamp, root,
+                    RawPointerEventType.Magnify, position, new Vector(magnification, magnification), modifiers));
+            if (_hwnd != IntPtr.Zero && translation != default)
+                input(new RawMouseWheelEventArgs(_mouseDevice, timestamp, root,
+                    position, translation / (50 * RenderScaling), modifiers) { IsTouchpad = true });
+        }
+
         [SuppressMessage("Microsoft.StyleCop.CSharp.NamingRules", "SA1305:FieldNamesMustNotUseHungarianNotation",
             Justification = "Using Win32 naming for consistency.")]
         [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "We do .NET COM interop availability checks")]
@@ -173,6 +189,8 @@ namespace Avalonia.Win32
 
                         _framebuffer.Dispose();
                         _inputPane?.Dispose();
+                        _touchpad?.Dispose();
+                        _touchpad = null;
 
                         //Window doesn't exist anymore
                         _hwnd = IntPtr.Zero;
@@ -654,8 +672,8 @@ namespace Avalonia.Win32
                     }
                 case WindowsMessage.DM_POINTERHITTEST:
                     {
-                        //DM stands for direct manipulation.
-                        //https://docs.microsoft.com/en-us/previous-versions/windows/desktop/directmanipulation/direct-manipulation-portal
+                        if (_touchpad?.TrySetContact((uint)ToInt32(wParam) & 0xffff) == true)
+                            return IntPtr.Zero;
                         break;
                     }
                 case WindowsMessage.WM_TOUCHHITTESTING:
@@ -717,6 +735,7 @@ namespace Avalonia.Win32
 
                 case WindowsMessage.WM_SHOWWINDOW:
                     var shown = wParam != default;
+                    _touchpad?.SetEnabled(shown);
                     OnShowHideMessage(shown);
                     if (shown)
                         RefreshPreferredColorVolume(checkDynamicState: true);
@@ -725,6 +744,8 @@ namespace Avalonia.Win32
                 case WindowsMessage.WM_SIZE:
                     {
                         var size = (SizeCommand)wParam;
+                        _touchpad?.Resize();
+                        _touchpad?.SetEnabled(size != SizeCommand.Minimized && IsWindowVisible(_hwnd));
 
                         var windowState = size switch
                         {

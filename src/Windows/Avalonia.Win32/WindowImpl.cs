@@ -82,6 +82,7 @@ namespace Avalonia.Win32
         private readonly Win32NativeControlHost _nativeControlHost;
         private readonly IStorageProvider _storageProvider;
         private WindowsInputPane? _inputPane;
+        private WindowsTouchpad? _touchpad;
         private WndProc _wndProcDelegate;
         private string? _className;
         private IntPtr _hwnd;
@@ -186,6 +187,7 @@ namespace Avalonia.Win32
                 s_instances.Add(this);
 
             StartPreferredColorVolumeTracking();
+            _touchpad = WindowsTouchpad.TryCreate(_hwnd, OnTouchpadGesture);
         }
 
         internal IInputRoot Owner
@@ -671,6 +673,8 @@ namespace Avalonia.Win32
 
         public void Dispose()
         {
+            _touchpad?.Dispose();
+            _touchpad = null;
             _inputPane?.Dispose();
             _inputPane = null;
             DisposePreferredColorVolumeTracking();
