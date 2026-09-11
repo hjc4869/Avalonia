@@ -528,6 +528,7 @@ partial class WaylandInputDispatcher : IDisposable
         {
             protected override void Enter(WlPointer eventSender, uint serial, WlSurface? surface, WlFixed surfaceX, WlFixed surfaceY)
             {
+                handler._modifiers = RawInputModifiers.None;
                 var shellSurface = WaylandInputDispatcher.FindSurfaceForWlSurface(surface);
                 var pos = new Point((double)surfaceX, (double)surfaceY);
                 handler._pointerPosition = pos;
