@@ -18,10 +18,13 @@ namespace Avalonia.Android
         private readonly Handler _handler;
         private readonly Runnable _signaler;
         private readonly Runnable _timerSignaler;
-        private readonly Runnable _wakeupSignaler;
+        private readonly Runnable _backgroundSignaler;
         private readonly MessageQueue _queue;
         private int _signaled;
         private bool _backgroundProcessingRequested;
+        private long? _backgroundProcessingDeadline;
+        private const int BackgroundProcessingInterval = 16;
+        private const int BackgroundProcessingBudget = 4;
         
 
         public AndroidDispatcherImpl()
@@ -34,7 +37,7 @@ namespace Avalonia.Android
             _handler = new Handler(_mainLooper);
             _signaler = new Runnable(OnSignaled);
             _timerSignaler = new Runnable(OnTimer);
-            _wakeupSignaler = new Runnable(() => { });
+            _backgroundSignaler = new Runnable(OnBackgroundProcessing);
             _queue = Looper.MyQueue();
             Looper.MyQueue().AddIdleHandler(new IdleHandler(this));
             CanQueryPendingInput = OperatingSystem.IsAndroidVersionAtLeast(23);
@@ -111,53 +114,43 @@ namespace Avalonia.Android
         
         public void RequestBackgroundProcessing()
         {
+            if (_backgroundProcessingRequested)
+                return;
             _backgroundProcessingRequested = true;
+            _handler.PostDelayed(_backgroundSignaler, BackgroundProcessingInterval);
+        }
+
+        private void OnBackgroundProcessing()
+        {
+            if (!_backgroundProcessingRequested)
+                return;
+            _handler.RemoveCallbacks(_backgroundSignaler);
+            _backgroundProcessingRequested = false;
+            _backgroundProcessingDeadline = Now + BackgroundProcessingBudget;
+            try
+            {
+                ReadyForBackgroundProcessing?.Invoke();
+            }
+            finally
+            {
+                _backgroundProcessingDeadline = null;
+            }
         }
 
         void OnIdle()
         {
-            tailCall:
-            if (_backgroundProcessingRequested)
-            {
-                _backgroundProcessingRequested = false;
-                ReadyForBackgroundProcessing?.Invoke();
-            }
-            
-            if (_backgroundProcessingRequested)
-            {
-                // Dispatcher requested background processing again, however if the queue is empty and we 
-                // just return here, Android's Looper will go to sleep and won't call us again and we'll have
-                // "background" jobs not being processed
-                // So we need to examine the queue state to prevent that scenario
-                
-                if (Volatile.Read(ref _signaled) != 0)
-                {
-                    return;
-                }
-                
-                if (CanQueryPendingInput)
-                {
-                    if (!HasPendingInput)
-                        // There are no events in the queue, so if we just return here, Looper will go to sleep,
-                        // so just run our logic again
-                        goto tailCall;
-                    // Nothing to do otherwise, we'll be called again after higher priority events get processed
-                }
-                else
-                {
-                    // On this API level we can't check if there is pending input,
-                    // so we explicitly wake up the Looper to make sure that it will call idle hooks again
-                    // before going to sleep
-                    _handler.Post(_wakeupSignaler);
-                }
-            }
+            if (!_backgroundProcessingRequested || (CanQueryPendingInput && HasPendingInput))
+                return;
+            OnBackgroundProcessing();
         }
 
         public bool CanQueryPendingInput { get; }
         
         // See check in ctor
 #pragma warning disable CA1416
-        public bool HasPendingInput => !_queue.IsIdle;
+        public bool HasPendingInput => _backgroundProcessingDeadline is { } deadline
+            ? Now >= deadline
+            : !_queue.IsIdle;
 #pragma warning restore CA1416
     }
 }
