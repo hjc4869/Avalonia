@@ -29,7 +29,8 @@ public partial class Dispatcher
         if (_osTimerSetTo == nextDueTime)
             return;
 
-        _impl.UpdateTimer(_osTimerSetTo = nextDueTime);
+        _osTimerSetTo = nextDueTime;
+        _impl.UpdateTimer(nextDueTime.HasValue ? _impl.Now + (nextDueTime.Value - Now) : null);
     }
 
     internal void RescheduleTimers()
