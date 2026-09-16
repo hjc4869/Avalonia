@@ -26,8 +26,11 @@ namespace Avalonia.Controls.Primitives
 
         protected override Size MeasureOverride(Size availableSize)
         {
-            foreach (var child in Children)
-                child.Measure(availableSize);
+            foreach (var child in Children.ToArray())
+            {
+                if (child.GetVisualParent() == this)
+                    child.Measure(availableSize);
+            }
             return availableSize;
         }
 
@@ -36,7 +39,12 @@ namespace Avalonia.Controls.Primitives
             // We are saving it here since child controls might need to know the entire size of the overlay
             // and Bounds won't be updated in time
             AvailableSize = finalSize;
-            return base.ArrangeOverride(finalSize);
+            foreach (var child in Children.ToArray())
+            {
+                if (child.GetVisualParent() == this)
+                    ArrangeChild(child, finalSize);
+            }
+            return finalSize;
         }
     }
 }
