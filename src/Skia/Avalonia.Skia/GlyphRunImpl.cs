@@ -151,8 +151,8 @@ namespace Avalonia.Skia
                 }
 
                 glyphPath.Transform(SKMatrix.CreateTranslation(
-                    _glyphPositions[i].X,
-                    _glyphPositions[i].Y));
+                    _glyphPositions[i].X + (float)BaselineOrigin.X,
+                    _glyphPositions[i].Y + (float)BaselineOrigin.Y));
                 textPath.AddPath(glyphPath);
             }
 
