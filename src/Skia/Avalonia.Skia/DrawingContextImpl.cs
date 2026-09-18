@@ -629,18 +629,6 @@ namespace Avalonia.Skia
                 // Determine effective TextOptions for text rendering. Start with current pushed TextOptions.
                 var effectiveTextOptions = TextOptions;
 
-                // If subpixel rendering is disabled globally, map subpixel modes to grayscale.
-                if (_disableSubpixelTextRendering)
-                {
-                    var mode = effectiveTextOptions.TextRenderingMode;
-
-                    if (mode == TextRenderingMode.SubpixelAntialias ||
-                        (mode == TextRenderingMode.Unspecified && (RenderOptions.EdgeMode == EdgeMode.Antialias || RenderOptions.EdgeMode == EdgeMode.Unspecified)))
-                    {
-                        effectiveTextOptions = effectiveTextOptions with { TextRenderingMode = TextRenderingMode.Antialias };
-                    }
-                }
-
                 var renderOptions = RenderOptions;
 
                 // If TextRenderingMode is unspecified in TextOptions, use the one from RenderOptions.
@@ -651,16 +639,24 @@ namespace Avalonia.Skia
                 }
 #pragma warning restore CS0618
 
+                // If subpixel rendering is disabled globally, map subpixel modes to grayscale.
+                if (_disableSubpixelTextRendering || _colorFormat.IsExtendedRange)
+                {
+                    var mode = effectiveTextOptions.TextRenderingMode;
+
+                    if (mode == TextRenderingMode.SubpixelAntialias ||
+                        (mode == TextRenderingMode.Unspecified && (RenderOptions.EdgeMode == EdgeMode.Antialias || RenderOptions.EdgeMode == EdgeMode.Unspecified)))
+                    {
+                        effectiveTextOptions = effectiveTextOptions with { TextRenderingMode = TextRenderingMode.Antialias };
+                    }
+                }
+
                 // Ganesh packs atlas text colors into 8-bit vertices, which clips scaled scRGB values.
                 if (OperatingSystem.IsWindows() && _colorFormat.ColorSpace == PlatformColorSpace.ScRgbLinear &&
                     glyphRunImpl.GetTextPath() is { } textPath)
                 {
-                    var restore = Canvas.Save();
-                    Canvas.Translate(
-                        (float)glyphRun.BaselineOrigin.X,
-                        (float)glyphRun.BaselineOrigin.Y);
+                    // The cached path includes the baseline origin, keeping brush coordinates unchanged.
                     Canvas.DrawPath(textPath, paintWrapper.Paint);
-                    Canvas.RestoreToCount(restore);
                 }
                 else
                 {
@@ -1290,16 +1286,6 @@ namespace Avalonia.Skia
                                          Matrix.CreateTranslation(alignmentTranslate);
             }
             
-            // Pre-rasterize the tile into SKPicture
-            using var pictureTarget = new PictureRenderTarget(_gpu, _grContext, _intermediateSurfaceDpi);
-            using (var ctx = pictureTarget.CreateDrawingContext(tileSize, false))
-            {
-                ctx.PushRenderOptions(RenderOptions);
-                content.Render(ctx, contentRenderTransform);
-                ctx.PopRenderOptions();
-            }
-            using var tile = pictureTarget.GetPicture();
-            
             // If there is no BrushTransform and destinationRect is at (0,0) we don't need any transforms
             Matrix shaderTransform = Matrix.Identity;
             
@@ -1318,6 +1304,50 @@ namespace Avalonia.Skia
             
             // Create shader
             var (tileX, tileY) = GetTileModes(content.Brush.TileMode);
+            if (_colorFormat.IsExtendedRange)
+            {
+                var total = Canvas.TotalMatrix.PreConcat(shaderTransform.ToSKMatrix());
+                var scaleX = Math.Sqrt((double)total.ScaleX * total.ScaleX + (double)total.SkewY * total.SkewY);
+                var scaleY = Math.Sqrt((double)total.ScaleY * total.ScaleY + (double)total.SkewX * total.SkewX);
+                var width = tileSize.Width * scaleX;
+                var height = tileSize.Height * scaleY;
+                if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
+                {
+                    paintWrapper.Paint.Color = SKColor.Empty;
+                    return;
+                }
+
+                const int maxTileArea = 2048 * 2048;
+                var maxDimension = Math.Min(maxTileArea, _grContext?.MaxRenderTargetSize ?? maxTileArea);
+                var reduction = Math.Min(1, 2048.0 / Math.Sqrt(width) / Math.Sqrt(height));
+                reduction = Math.Min(reduction, Math.Min(maxDimension / width, maxDimension / height));
+                var pixelWidth = Math.Clamp((int)Math.Ceiling(width * reduction), 1, maxDimension);
+                var pixelHeight = Math.Clamp((int)Math.Ceiling(height * reduction), 1, maxDimension);
+                using var intermediate = CreateRenderTarget(new PixelSize(pixelWidth, pixelHeight), false, false);
+                using (var ctx = intermediate.CreateDrawingContext())
+                {
+                    ctx.Clear(Colors.Transparent);
+                    ctx.PushRenderOptions(RenderOptions);
+                    content.Render(ctx, contentRenderTransform * Matrix.CreateScale(
+                        pixelWidth / tileSize.Width, pixelHeight / tileSize.Height));
+                    ctx.PopRenderOptions();
+                }
+                using var image = intermediate.SnapshotImage();
+                var imageTransform = Matrix.CreateScale(tileSize.Width / pixelWidth, tileSize.Height / pixelHeight)
+                    * shaderTransform;
+                using var imageShader = image.ToShader(tileX, tileY, imageTransform.ToSKMatrix());
+                paintWrapper.Paint.Shader = imageShader;
+                return;
+            }
+
+            using var pictureTarget = new PictureRenderTarget(_gpu, _grContext, _intermediateSurfaceDpi);
+            using (var ctx = pictureTarget.CreateDrawingContext(tileSize, false))
+            {
+                ctx.PushRenderOptions(RenderOptions);
+                content.Render(ctx, contentRenderTransform);
+                ctx.PopRenderOptions();
+            }
+            using var tile = pictureTarget.GetPicture();
             using(var shader = tile.ToShader(tileX, tileY, shaderTransform.ToSKMatrix(), 
                       new SKRect(0, 0, tile.CullRect.Width, tile.CullRect.Height)))
             {
