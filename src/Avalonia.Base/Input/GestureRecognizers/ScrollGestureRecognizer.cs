@@ -161,6 +161,12 @@ namespace Avalonia.Input.GestureRecognizers
             if (e.Pointer.Type is PointerType.Touch or PointerType.Pen
                 && point.Properties.IsLeftButtonPressed)
             {
+                if (_inertia.HasValue)
+                {
+                    Capture(e.Pointer);
+                    e.Handled = true;
+                }
+
                 EndGesture();
                 _tracking = e.Pointer;
                 _inertia = null;
