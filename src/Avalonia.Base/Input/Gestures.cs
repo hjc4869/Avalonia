@@ -68,6 +68,9 @@ namespace Avalonia.Input
                     s_gestureState = null;
                 }
 
+                if (e.Pointer is Pointer { CapturedGestureRecognizer: not null })
+                    return;
+
                 if (e.ClickCount % 2 == 1)
                 {
                     s_gestureState = new GestureState(GestureStateType.Pending, e.Pointer);
