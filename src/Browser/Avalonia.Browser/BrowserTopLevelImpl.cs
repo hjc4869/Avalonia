@@ -172,6 +172,11 @@ namespace Avalonia.Browser
                 return AvaloniaLocator.Current.GetService<IScreenImpl>();
             }
 
+            if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            {
+                return AvaloniaLocator.Current.GetService<IScreenImpl>() as BrowserScreens;
+            }
+
             if (featureType == typeof(INativeControlHostImpl))
             {
                 return _nativeControlHost;
