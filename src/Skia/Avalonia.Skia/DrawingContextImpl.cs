@@ -629,18 +629,6 @@ namespace Avalonia.Skia
                 // Determine effective TextOptions for text rendering. Start with current pushed TextOptions.
                 var effectiveTextOptions = TextOptions;
 
-                // If subpixel rendering is disabled globally, map subpixel modes to grayscale.
-                if (_disableSubpixelTextRendering)
-                {
-                    var mode = effectiveTextOptions.TextRenderingMode;
-
-                    if (mode == TextRenderingMode.SubpixelAntialias ||
-                        (mode == TextRenderingMode.Unspecified && (RenderOptions.EdgeMode == EdgeMode.Antialias || RenderOptions.EdgeMode == EdgeMode.Unspecified)))
-                    {
-                        effectiveTextOptions = effectiveTextOptions with { TextRenderingMode = TextRenderingMode.Antialias };
-                    }
-                }
-
                 var renderOptions = RenderOptions;
 
                 // If TextRenderingMode is unspecified in TextOptions, use the one from RenderOptions.
@@ -650,6 +638,18 @@ namespace Avalonia.Skia
                     effectiveTextOptions = effectiveTextOptions with { TextRenderingMode = renderOptions.TextRenderingMode };
                 }
 #pragma warning restore CS0618
+
+                // If subpixel rendering is disabled globally, map subpixel modes to grayscale.
+                if (_disableSubpixelTextRendering || _colorFormat.IsExtendedRange)
+                {
+                    var mode = effectiveTextOptions.TextRenderingMode;
+
+                    if (mode == TextRenderingMode.SubpixelAntialias ||
+                        (mode == TextRenderingMode.Unspecified && (RenderOptions.EdgeMode == EdgeMode.Antialias || RenderOptions.EdgeMode == EdgeMode.Unspecified)))
+                    {
+                        effectiveTextOptions = effectiveTextOptions with { TextRenderingMode = TextRenderingMode.Antialias };
+                    }
+                }
 
                 // Ganesh packs atlas text colors into 8-bit vertices, which clips scaled scRGB values.
                 if (OperatingSystem.IsWindows() && _colorFormat.ColorSpace == PlatformColorSpace.ScRgbLinear &&
