@@ -625,6 +625,62 @@ namespace Avalonia.Base.UnitTests.Input
             Assert.False(raised);
         }
 
+        [Theory]
+        [InlineData(true, true)]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        [InlineData(false, false)]
+        public void Tapping_During_Scroll_Inertia_Should_Stop_Scrolling_Without_Tapping_Child(
+            bool horizontal,
+            bool reusePointer)
+        {
+            using var app = UnitTestApplication.Start(TestServices.StyledWindow);
+            var child = new Border();
+            var border = new Border { Child = child };
+            border.GestureRecognizers.Add(new ScrollGestureRecognizer
+            {
+                CanHorizontallyScroll = horizontal,
+                CanVerticallyScroll = !horizontal,
+                IsScrollInertiaEnabled = true
+            });
+            var root = new TestRoot { Child = border };
+            var inertiaStarted = false;
+            var scrollEnded = false;
+            var tapped = false;
+            var doubleTapped = false;
+
+            root.AddHandler(InputElement.ScrollGestureEvent, (_, args) => args.Handled = true);
+            root.AddHandler(InputElement.ScrollGestureInertiaStartingEvent, (_, _) => inertiaStarted = true);
+            root.AddHandler(InputElement.ScrollGestureEndedEvent, (_, _) => scrollEnded = true);
+            child.Tapped += (_, _) => tapped = true;
+            child.DoubleTapped += (_, _) => doubleTapped = true;
+
+            var scrollingTouch = new TouchTestHelper();
+            scrollingTouch.Down(child);
+            scrollingTouch.Move(child, horizontal ? new Point(10, 0) : new Point(0, 10));
+            scrollingTouch.Move(child, horizontal ? new Point(20, 0) : new Point(0, 20));
+            scrollingTouch.Move(child, horizontal ? new Point(30, 0) : new Point(0, 30));
+            scrollingTouch.Up(child, horizontal ? new Point(30, 0) : new Point(0, 30));
+
+            Assert.True(inertiaStarted);
+            Assert.False(scrollEnded);
+            Assert.False(tapped);
+
+            var stoppingTouch = reusePointer ? scrollingTouch : new TouchTestHelper();
+            stoppingTouch.Down(child);
+
+            Assert.True(scrollEnded);
+
+            stoppingTouch.Up(child);
+
+            Assert.False(tapped);
+            Assert.False(doubleTapped);
+
+            new TouchTestHelper().Tap(child);
+
+            Assert.True(tapped);
+        }
+
         [Fact]
         public void Scrolling_Should_Start_After_Start_Distance_Is_Exceeded()
         {
