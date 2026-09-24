@@ -31,7 +31,7 @@ using ClipboardManager = Android.Content.ClipboardManager;
 
 namespace Avalonia.Android.Platform.SkiaPlatform
 {
-    class TopLevelImpl : ITopLevelImpl, IPlatformSurfaceColorVolumeFeature,
+    class TopLevelImpl : ITopLevelImpl, IPlatformSurfaceColorVolumeFeature, IPlatformHdrContentFeature,
         EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume,
         EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithWaitPolicy
     {
@@ -52,6 +52,7 @@ namespace Avalonia.Android.Platform.SkiaPlatform
         private Display? _hdrSdrRatioDisplay;
         private HdrSdrRatioChangedListener? _hdrSdrRatioListener;
         private ColorVolumeState _colorVolumeState = new(null);
+        private bool _hasHdrContent;
 
         public TopLevelImpl(AvaloniaView avaloniaView, bool placeOnTop = false)
         {
@@ -112,6 +113,16 @@ namespace Avalonia.Android.Platform.SkiaPlatform
             Volatile.Read(ref _colorVolumeState).Value;
 
         public event EventHandler? PreferredColorVolumeChanged;
+
+        public void SetHdrContent(bool hasHdrContent)
+        {
+            Dispatcher.UIThread.VerifyAccess();
+            if (_view is not { } view || _hasHdrContent == hasHdrContent)
+                return;
+
+            _hasHdrContent = hasHdrContent;
+            view.UpdateDesiredHdrHeadroom(view.Display);
+        }
 
         public View? View => _view;
 
@@ -305,8 +316,12 @@ namespace Avalonia.Android.Platform.SkiaPlatform
 
             internal void UpdateDesiredHdrHeadroom(Display? display)
             {
-                if (OperatingSystem.IsAndroidVersionAtLeast(35))
-                    SetDesiredHdrHeadroom(AndroidPlatform.GetDesiredHdrHeadroom(display) ?? 0);
+                if (OperatingSystem.IsAndroidVersionAtLeast(35) && AndroidPlatform.IsExtendedLinearColorActive)
+                {
+                    SetDesiredHdrHeadroom(_tl._hasHdrContent
+                        ? AndroidPlatform.GetDesiredHdrHeadroom(display) ?? 0
+                        : 1);
+                }
             }
 
             protected override void OnConfigurationChanged(global::Android.Content.Res.Configuration? newConfig)
@@ -533,6 +548,10 @@ namespace Avalonia.Android.Platform.SkiaPlatform
                 return _feedback;
             }
             if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            {
+                return this;
+            }
+            if (featureType == typeof(IPlatformHdrContentFeature) && AndroidPlatform.IsExtendedLinearColorActive)
             {
                 return this;
             }

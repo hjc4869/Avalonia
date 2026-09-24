@@ -25,7 +25,7 @@ namespace Avalonia.Wayland;
 /// callbacks and no-op platform methods that Wayland doesn't support
 /// (Move, SetTopmost, Activate, PointToClient/Screen, etc.).
 /// </summary>
-internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfaceColorVolumeFeature
+internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfaceColorVolumeFeature, IPlatformHdrContentFeature
 {
     protected WaylandWorkerClient Client { get; }
     protected IInputRoot? InputRoot { get; private set; }
@@ -36,6 +36,7 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
     protected WaylandCursorImpl? CurrentCursor { get; private set; }
     protected bool IsEnabled  { get; set; } = true;
     protected bool IsDisposed  { get; private set; }
+    private bool _hasHdrContent;
     
     internal IReadOnlyList<object> CurrentOutputIds { get; set; } = Array.Empty<object>();
 
@@ -158,6 +159,17 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
 
     public event EventHandler? PreferredColorVolumeChanged;
 
+    public void SetHdrContent(bool hasHdrContent)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        if (IsDisposed || _hasHdrContent == hasHdrContent)
+            return;
+        _hasHdrContent = hasHdrContent;
+        ApplyHdrContent(SurfaceProxy);
+    }
+
+    internal void ApplyHdrContent(WXdgShellSurfaceProxy? proxy) => proxy?.SetHdrContent(_hasHdrContent);
+
     private void UpdatePreferredColorVolume(PlatformSurfaceColorVolume? colorVolume)
     {
         if (PreferredColorVolume == colorVolume)
@@ -177,6 +189,8 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
         if (featureType == typeof(ILauncher))
             return new BclLauncher();
         if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            return this;
+        if (featureType == typeof(IPlatformHdrContentFeature))
             return this;
         return null;
     }

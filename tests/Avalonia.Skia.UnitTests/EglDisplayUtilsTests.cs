@@ -43,19 +43,22 @@ public class EglDisplayUtilsTests
         Assert.Equal([EGL_NONE], EglDisplayUtils.GetWindowSurfaceAttributes(PlatformColorSpace.Unmanaged));
     }
 
-    [Fact]
-    public void ScRgb_Color_Volume_Uses_Egl_Luminance_Scale_And_Current_Headroom()
+    [Theory]
+    [InlineData(1, 80)]
+    [InlineData(5, 400)]
+    public void ScRgb_Color_Volume_Uses_Egl_Luminance_Scale_And_Current_Headroom(
+        double headroomRatio, double expectedMaximumNits)
     {
         var volume = EglDisplayUtils.CreateScRgbColorVolume(
-            0.005, 1000, 5, PlatformTransferFunction.Pq);
+            0.005, 1000, headroomRatio, PlatformTransferFunction.Pq);
 
         Assert.Equal(new PlatformSurfaceColorVolume(
             new PlatformLuminanceRange(0, 80),
             80,
-            new PlatformLuminanceRange(0.005, 400),
+            new PlatformLuminanceRange(0.005, expectedMaximumNits),
             PlatformTransferFunction.Pq,
             SurfaceNitsPerUnit: 80), volume);
-        Assert.Equal(5, volume?.HeadroomRatio);
+        Assert.Equal(headroomRatio, volume?.HeadroomRatio);
         Assert.Equal(1, volume?.ReferenceWhiteScale);
     }
 

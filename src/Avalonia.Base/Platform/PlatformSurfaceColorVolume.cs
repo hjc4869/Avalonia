@@ -137,3 +137,17 @@ public interface IPlatformSurfaceColorVolumeFeature
     /// </summary>
     event EventHandler? PreferredColorVolumeChanged;
 }
+
+/// <summary>
+/// Provides a content hint that lets the platform reserve HDR headroom for a top level.
+/// Obtained through <see cref="IOptionalFeatureProvider.TryGetFeature"/>.
+/// </summary>
+[Unstable]
+public interface IPlatformHdrContentFeature
+{
+    /// <summary>
+    /// Sets whether visible content needs luminance above reference white. Call on the UI thread,
+    /// and reset to false when that content is removed or rendered as SDR. The default is false.
+    /// </summary>
+    void SetHdrContent(bool hasHdrContent);
+}

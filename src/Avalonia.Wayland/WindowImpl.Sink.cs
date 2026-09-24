@@ -71,6 +71,8 @@ partial class WindowImpl
             if (Parent.CurrentCursor is not null)
                 Parent.ApplyCurrentCursor(_surfaceProxy);
 
+            Parent.ApplyHdrContent(_surfaceProxy);
+
             // Re-register text-input sink on the freshly created worker
             // surface and re-apply current state, if a client is attached.
             Parent._textInputMethod?.OnSurfaceCreated();

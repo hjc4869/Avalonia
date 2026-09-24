@@ -9,9 +9,8 @@ using NWayland.Protocols.Wayland;
 namespace Avalonia.Wayland.Server.Transient.Rendering;
 
 /// <summary>
-/// Wraps <c>wp_color_manager_v1</c>. Owns the single image description describing the color space
-/// Avalonia renders its surfaces in, and tags every <c>wl_surface</c> with it so the compositor knows
-/// how to convert our pixels for the output it ends up on.
+/// Wraps <c>wp_color_manager_v1</c>. Owns the image descriptions for Avalonia's surface encoding
+/// and SDR/HDR content ranges, and tags each <c>wl_surface</c> with its requested range.
 ///
 /// Lives on the Wayland worker thread together with the rest of the transient objects.
 /// </summary>
@@ -24,6 +23,7 @@ internal sealed class WaylandColorManager : IDisposable
 
     // scRGB's own reference white, which is what signal 1.0 stands for on an extended linear surface.
     private const uint ScRgbReferenceWhiteNits = 80;
+    private const uint ExtendedLinearTargetPeakNits = 10_000;
 
     private readonly WaylandConnection _connection;
     private WpColorManagerV1 _manager = null!;
@@ -34,6 +34,8 @@ internal sealed class WaylandColorManager : IDisposable
 
     private WpImageDescriptionV1? _imageDescription;
     private bool _imageDescriptionReady;
+    private WpImageDescriptionV1? _hdrImageDescription;
+    private bool _hdrImageDescriptionReady;
     private bool _usesAbsoluteScRgb;
 
     private WaylandColorManager(WaylandConnection connection)
@@ -125,35 +127,24 @@ internal sealed class WaylandColorManager : IDisposable
             {
                 _usesAbsoluteScRgb = true;
                 _imageDescription = _manager.CreateWindowsScrgb(
-                    new ImageDescriptionListener(this), _connection.Queue);
+                    new ImageDescriptionListener(ready => _imageDescriptionReady = ready), _connection.Queue);
             }
             else
             {
-                // These two interfaces have no events, but NWayland still requires a listener
-                // whenever a target queue is given, so empty ones are supplied.
-                var creator = _manager.CreateParametricCreator(new ParamsCreatorListener(), _connection.Queue);
-                creator.SetPrimariesNamed(ToWaylandPrimaries(colorSpace));
-                creator.SetTfNamed(ToWaylandTransferFunction(colorSpace));
-
-                // Linear light is absolute: 0 is no emission at all, not the 0.2 cd/m² the
-                // protocol otherwise defaults the primary volume's minimum to. Left at the default
-                // the compositor has a black floor to map out of the surface, and it arrives as
-                // lifted shadows. Only the reference white is kept, so 1.0 still means white.
-                if (colorSpace == PlatformColorSpace.ScRgbLinear && SupportsSetLuminances)
-                    creator.SetLuminances(0, ScRgbReferenceWhiteNits, ScRgbReferenceWhiteNits);
-
-                // `create` is a destructor request. Passing an explicit target queue here makes
-                // NWayland route it through a proxy wrapper and then destroy the wrapper, which
-                // aborts inside libwayland, so the image description inherits the creator's queue
-                // (our own) instead.
-                _imageDescription = creator.Create(new ImageDescriptionListener(this), null);
+                _imageDescription = CreateParametricDescription(colorSpace, ScRgbReferenceWhiteNits,
+                    ready => _imageDescriptionReady = ready);
+                if (colorSpace == PlatformColorSpace.ScRgbLinear)
+                {
+                    _hdrImageDescription = CreateParametricDescription(colorSpace, ExtendedLinearTargetPeakNits,
+                        ready => _hdrImageDescriptionReady = ready);
+                }
             }
 
             // ready/failed arrives asynchronously; we need the answer before the first frame is
             // committed, so block here rather than rendering a frame with an unknown color space.
             _connection.Queue.Roundtrip();
 
-            if (!_imageDescriptionReady)
+            if (!_imageDescriptionReady || (_hdrImageDescription != null && !_hdrImageDescriptionReady))
             {
                 DestroyImageDescription();
                 return false;
@@ -171,11 +162,29 @@ internal sealed class WaylandColorManager : IDisposable
         }
     }
 
+    private WpImageDescriptionV1 CreateParametricDescription(PlatformColorSpace colorSpace, uint targetPeakNits,
+        Action<bool> ready)
+    {
+        var creator = _manager.CreateParametricCreator(new ParamsCreatorListener(), _connection.Queue);
+        creator.SetPrimariesNamed(ToWaylandPrimaries(colorSpace));
+        creator.SetTfNamed(ToWaylandTransferFunction(colorSpace));
+        if (colorSpace == PlatformColorSpace.ScRgbLinear)
+        {
+            if (SupportsSetLuminances)
+                creator.SetLuminances(0, ScRgbReferenceWhiteNits, ScRgbReferenceWhiteNits);
+            creator.SetMasteringDisplayPrimaries(
+                708_000, 292_000, 170_000, 797_000,
+                131_000, 46_000, 312_700, 329_000);
+            creator.SetMasteringLuminance(0, targetPeakNits);
+        }
+        return creator.Create(new ImageDescriptionListener(ready), null);
+    }
+
     /// <summary>
     /// Tags a surface with the active image description. The returned object must be destroyed
     /// before the <c>wl_surface</c> it was created from.
     /// </summary>
-    public WpColorManagementSurfaceV1? TryAttach(WlSurface surface)
+    public WpColorManagementSurfaceV1? TryAttach(WlSurface surface, bool hasHdrContent = false)
     {
         if (_imageDescription == null || !_imageDescriptionReady)
             return null;
@@ -184,7 +193,7 @@ internal sealed class WaylandColorManager : IDisposable
         try
         {
             colorSurface = _manager.GetSurface(surface, new ColorSurfaceListener(), _connection.Queue);
-            colorSurface.SetImageDescription(_imageDescription, PreferredRenderIntent);
+            SetHdrContent(colorSurface, hasHdrContent);
             return colorSurface;
         }
         catch (Exception e)
@@ -195,6 +204,14 @@ internal sealed class WaylandColorManager : IDisposable
             colorSurface?.Dispose();
             return null;
         }
+    }
+
+    public void SetHdrContent(WpColorManagementSurfaceV1 surface, bool hasHdrContent)
+    {
+        if (_imageDescription == null || !_imageDescriptionReady)
+            return;
+        var description = hasHdrContent && _hdrImageDescriptionReady ? _hdrImageDescription! : _imageDescription;
+        surface.SetImageDescription(description, PreferredRenderIntent);
     }
 
     /// <summary>
@@ -223,6 +240,8 @@ internal sealed class WaylandColorManager : IDisposable
 
     private bool SupportsParametricExtendedLinear =>
         _features.Contains(WpColorManagerV1.FeatureEnum.Parametric)
+        && _features.Contains(WpColorManagerV1.FeatureEnum.SetMasteringDisplayPrimaries)
+        && _features.Contains(WpColorManagerV1.FeatureEnum.ExtendedTargetVolume)
         && _transferFunctions.Contains(WpColorManagerV1.TransferFunctionEnum.ExtLinear)
         && _primaries.Contains(WpColorManagerV1.PrimariesEnum.Srgb);
 
@@ -248,12 +267,19 @@ internal sealed class WaylandColorManager : IDisposable
     private void DestroyImageDescription()
     {
         _imageDescriptionReady = false;
+        _hdrImageDescriptionReady = false;
         ActiveColorSpace = PlatformColorSpace.Unmanaged;
         if (_imageDescription != null)
         {
             _imageDescription.Destroy();
             _imageDescription.Dispose();
             _imageDescription = null;
+        }
+        if (_hdrImageDescription != null)
+        {
+            _hdrImageDescription.Destroy();
+            _hdrImageDescription.Dispose();
+            _hdrImageDescription = null;
         }
     }
 
@@ -288,15 +314,15 @@ internal sealed class WaylandColorManager : IDisposable
 
     private sealed class ColorSurfaceListener : WpColorManagementSurfaceV1.Listener;
 
-    private sealed class ImageDescriptionListener(WaylandColorManager p) : WpImageDescriptionV1.Listener
+    private sealed class ImageDescriptionListener(Action<bool> ready) : WpImageDescriptionV1.Listener
     {
         protected override void Ready(WpImageDescriptionV1 eventSender, uint identity)
-            => p._imageDescriptionReady = true;
+            => ready(true);
 
         protected override void Failed(WpImageDescriptionV1 eventSender, WpImageDescriptionV1.CauseEnum cause,
             string msg)
         {
-            p._imageDescriptionReady = false;
+            ready(false);
             Logger.TryGet(LogEventLevel.Warning, "Wayland")?.Log(null,
                 "Compositor rejected our image description ({0}): {1}", cause, msg);
         }

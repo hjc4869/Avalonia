@@ -36,8 +36,8 @@ Both sides have to agree before anything changes, and the negotiation happens on
    primaries (`WaylandColorManager.SelectColorSpace`).
 2. Only then create the EGL display, passing high bit depth `EglColorBufferFormat` candidates with
    the plain 8 bit config last as a fallback.
-3. Create the image description for whatever EGL actually handed us, and tag every `wl_surface`
-   with it via `wp_color_management_surface_v1.set_image_description`.
+3. Create the image descriptions for whatever EGL actually handed us, and tag each `wl_surface`
+  with its content range via `wp_color_management_surface_v1.set_image_description`.
 
 **Invariant: what we render and what we tag the surface with must always match.** An untagged
 surface is interpreted as sRGB, so rendering P3 pixels into one shifts every color on screen. If
@@ -54,6 +54,33 @@ all. Left at the default, the compositor has a black level to map out of the sur
 as lifted shadows, which is the one thing an extended range surface is supposed to reproduce exactly.
 Only the minimum is changed; the maximum and reference white stay at scRGB's 80 cd/m², so signal 1.0
 still means the reference white.
+
+The parametric extended-linear descriptions declare a separate BT.2020 target volume with an
+80-nit peak for SDR content and a 10,000-nit peak for HDR content. Both descriptions preserve the
+surface's sRGB primaries, linear encoding, and reference white. This requires the compositor's
+`set_mastering_display_primaries` and `extended_target_volume` features; otherwise the backend uses
+the Windows-scRGB fallback when available.
+
+### HDR content hint
+
+`IPlatformHdrContentFeature` is an optional, platform-neutral top-level feature. Applications call
+`SetHdrContent(true)` on the UI thread while visible content needs luminance above reference white,
+and `SetHdrContent(false)` when that content is removed or rendered as SDR. The default is false;
+applications with multiple HDR views must combine their requests for the same top level.
+
+```csharp
+topLevel.PlatformImpl?.TryGetFeature<IPlatformHdrContentFeature>()?.SetHdrContent(hasHdrContent);
+```
+
+Wayland creates both descriptions during connection setup and switches between them per surface
+without recreating buffers or waiting for another image description. The hint is retained when a
+native surface is recreated or the compositor reconnects. This is a binary content hint, not a
+measurement of each frame's peak. The compositor chooses and animates the available headroom;
+other HDR windows can keep it active on the same display.
+
+The Windows-scRGB fallback has a fixed description and does not change its range in response to
+this hint. See [HDR content hints](../../docs/hdr-content-hints.md) for the Android implementation
+and Windows API limitations.
 
 ### Peak luminance / reference white
 

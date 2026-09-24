@@ -69,6 +69,8 @@ namespace Avalonia
         /// Requires Android 15 (API level 35) or newer, an HDR or wide-gamut display,
         /// <see cref="AndroidRenderingMode.Egl"/>, and EGL scRGB linear support.
         /// Unsupported configurations silently fall back to <see cref="Standard"/>.
+        /// Surfaces initially request no HDR headroom. Use <see cref="IPlatformHdrContentFeature.SetHdrContent"/>
+        /// to request headroom while HDR content is visible, and reset the hint when it is removed or rendered as SDR.
         /// </remarks>
         ExtendedLinear
     }

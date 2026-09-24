@@ -66,4 +66,6 @@ internal interface IWSurface
     /// reconnect.
     /// </summary>
     void SetHitTestVisible(bool value);
+
+    void SetHdrContent(bool hasHdrContent);
 }

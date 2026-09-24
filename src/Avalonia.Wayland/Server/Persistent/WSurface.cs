@@ -30,6 +30,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     protected WpViewport? Viewport { get; private set; }
     private WpColorManagementSurfaceV1? _colorSurface;
     private WaylandColorVolumeFeedback? _colorVolumeFeedback;
+    private bool _hasHdrContent;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -121,6 +122,19 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
 
     public virtual void ResetTextInput() => TextInputV3?.Reset(this);
 
+    public void SetHdrContent(bool hasHdrContent)
+    {
+        if (_hasHdrContent == hasHdrContent)
+            return;
+        _hasHdrContent = hasHdrContent;
+        if (_colorSurface == null)
+            return;
+        Globals?.ColorManager?.SetHdrContent(_colorSurface, hasHdrContent);
+        if (CanCommitOutOfBand)
+            WlSurface?.Commit();
+        Worker.WakeupRenderLoop();
+    }
+
     public void SetHitTestVisible(bool value)
     {
         if (_hitTestVisible == value)
@@ -193,7 +207,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             Viewport = globals.Viewporter!.GetViewport(WlSurface);
         }
 
-        _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
+        _colorSurface = globals.ColorManager?.TryAttach(WlSurface, _hasHdrContent);
         _colorVolumeFeedback = globals.ColorManager?.TryTrackColorVolume(WlSurface, SetPreferredColorVolume);
 
     // Re-apply the cached input region on (re)connect. It's double-buffered
