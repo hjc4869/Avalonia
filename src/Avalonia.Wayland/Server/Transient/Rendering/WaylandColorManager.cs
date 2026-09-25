@@ -24,6 +24,7 @@ internal sealed class WaylandColorManager : IDisposable
     // scRGB's own reference white, which is what signal 1.0 stands for on an extended linear surface.
     private const uint ScRgbReferenceWhiteNits = 80;
     private const uint ExtendedLinearTargetPeakNits = 10_000;
+    private const uint PqReferenceWhiteNits = 203;
 
     private readonly WaylandConnection _connection;
     private WpColorManagerV1 _manager = null!;
@@ -97,6 +98,10 @@ internal sealed class WaylandColorManager : IDisposable
             case WaylandColorMode.ExtendedLinear:
                 if (SupportsParametricExtendedLinear || _features.Contains(WpColorManagerV1.FeatureEnum.WindowsScrgb))
                     return PlatformColorSpace.ScRgbLinear;
+                if (_features.Contains(WpColorManagerV1.FeatureEnum.Parametric)
+                    && _transferFunctions.Contains(WpColorManagerV1.TransferFunctionEnum.St2084Pq)
+                    && _primaries.Contains(WpColorManagerV1.PrimariesEnum.Bt2020))
+                    return PlatformColorSpace.Rec2020Pq;
                 return PlatformColorSpace.Unmanaged;
 
             default:
@@ -230,7 +235,9 @@ internal sealed class WaylandColorManager : IDisposable
     // so the compositor re-anchors its reference white to the display's and 1.0 arrives as diffuse
     // white; Windows-scRGB instead pins 1.0 to 80 cd/m² whatever the display is set to.
     private double SurfaceNitsPerUnit(PlatformSurfaceColorVolume volume) =>
-        _usesAbsoluteScRgb ? ScRgbReferenceWhiteNits : volume.ReferenceWhiteNits;
+        ActiveColorSpace == PlatformColorSpace.Rec2020Pq
+            ? volume.ReferenceWhiteNits * ExtendedLinearTargetPeakNits / PqReferenceWhiteNits
+            : _usesAbsoluteScRgb ? ScRgbReferenceWhiteNits : volume.ReferenceWhiteNits;
 
     // Perceptual is the only intent the protocol requires every compositor to support.
     private WpColorManagerV1.RenderIntentEnum PreferredRenderIntent =>

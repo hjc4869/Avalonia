@@ -124,6 +124,9 @@ public enum WaylandColorMode
     /// channel values below 0 and above 1 are meaningful. This is the HDR-capable mode. Note that
     /// blending and gradient interpolation happen in linear light, which visibly differs from
     /// Avalonia's historical sRGB-encoded blending.
+    /// When the compositor cannot accept scRGB, uses a bounded Rec. 2020 PQ surface if supported,
+    /// preferring 10 bit over 16 bit float. Skia composes in FP16 scRGB and converts to PQ on
+    /// presentation. Custom rendering must use the color format reported by its drawing lease.
     /// </summary>
     ExtendedLinear
 }

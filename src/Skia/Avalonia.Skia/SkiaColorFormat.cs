@@ -20,10 +20,17 @@ internal static class SkiaColorFormat
     private static readonly SKColorSpace s_rec2020 =
         SKColorSpace.CreateRgb(SKColorSpaceTransferFn.TwoDotTwo, SKColorSpaceXyz.Rec2020);
 
-    private static readonly SKColorSpace s_rec2020Pq =
-        SKColorSpace.CreateRgb(SKColorSpaceTransferFn.Pq, SKColorSpaceXyz.Rec2020);
+    private static readonly SKColorSpace s_rec2020Pq = CreateRec2020Pq();
 
     private static readonly Dictionary<double, SKColorSpace> s_scaledScRgb = new();
+
+    private static SKColorSpace CreateRec2020Pq()
+    {
+        var values = SKColorSpaceXyz.Rec2020.Values;
+        for (var index = 0; index < values.Length; index++)
+            values[index] *= 10000f / 203f;
+        return SKColorSpace.CreateRgb(SKColorSpaceTransferFn.Pq, new SKColorSpaceXyz(values));
+    }
 
     /// <summary>
     /// Returns the Skia color space for the given platform color space, or null for

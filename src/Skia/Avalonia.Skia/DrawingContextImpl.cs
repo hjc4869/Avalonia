@@ -37,6 +37,7 @@ namespace Avalonia.Skia
         public GRContext? GrContext => _grContext;
         private readonly ISkiaGpu? _gpu;
         private readonly PlatformSurfaceColorFormat _colorFormat;
+        public PlatformSurfaceColorFormat ColorFormat => _colorFormat;
         private readonly PlatformSurfaceColorVolume? _preferredColorVolume;
         private readonly SKPaint _strokePaint = SKPaintCache.Shared.Get();
         private readonly SKPaint _fillPaint = SKPaintCache.Shared.Get();
@@ -87,9 +88,8 @@ namespace Avalonia.Skia
             public ISkiaGpu? Gpu;
 
             /// <summary>
-            /// Pixel encoding and color space of the target surface. Layers and intermediate surfaces
-            /// created by this context inherit it so that wide gamut content isn't clamped on the way
-            /// to the swapchain.
+            /// Pixel encoding and color space of the target surface. PQ composition layers use
+            /// FP16 scRGB; other intermediate surfaces inherit their parent's format.
             /// </summary>
             public PlatformSurfaceColorFormat ColorFormat;
 
@@ -1556,19 +1556,27 @@ namespace Avalonia.Skia
         /// <returns></returns>
         private SurfaceRenderTarget CreateRenderTarget(PixelSize pixelSize, bool isLayer, bool useScaledDrawing, PixelFormat? format = null)
         {
+            var useLinearLayer = isLayer && _colorFormat.ColorSpace == PlatformColorSpace.Rec2020Pq;
+            var colorFormat = useLinearLayer
+                ? new PlatformSurfaceColorFormat(PlatformPixelEncoding.RgbaF16, PlatformColorSpace.ScRgbLinear)
+                : _colorFormat;
+            var colorVolume = useLinearLayer && _preferredColorVolume is { } volume
+                ? volume with { SurfaceNitsPerUnit = volume.ReferenceWhiteNits }
+                : _preferredColorVolume;
+
             var createInfo = new SurfaceRenderTarget.CreateInfo
             {
                 Width = pixelSize.Width,
                 Height = pixelSize.Height,
                 Dpi = _intermediateSurfaceDpi,
                 Format = format,
-                ColorFormat = _colorFormat,
-                PreferredColorVolume = _preferredColorVolume,
+                ColorFormat = colorFormat,
+                PreferredColorVolume = colorVolume,
                 DisableTextLcdRendering = isLayer ? _disableSubpixelTextRendering : true,
                 GrContext = _grContext,
                 Gpu = _gpu,
                 Session = _session,
-                DisableManualFbo = !isLayer,
+                DisableManualFbo = !isLayer || useLinearLayer,
                 UseScaledDrawing = useScaledDrawing
             };
 

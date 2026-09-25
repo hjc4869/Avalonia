@@ -27,7 +27,8 @@ Off by default. `WaylandPlatformOptions.ColorMode` opts in:
   into the wider space; blending stays gamma-encoded so gradients and antialiasing are unaffected.
 - `ExtendedLinear` — fp16 scRGB surface (sRGB primaries, extended linear transfer). Channel values
   below 0 and above 1 are meaningful, so it's the HDR-capable mode, but blending happens in linear
-  light and therefore differs from Avalonia's historical sRGB-encoded blending.
+  light and therefore differs from Avalonia's historical sRGB-encoded blending. Falls back to
+  BT.2020 PQ when the compositor supports PQ but cannot accept scRGB.
 
 Both sides have to agree before anything changes, and the negotiation happens once, in
 `WaylandGlobals`:
@@ -59,7 +60,19 @@ The parametric extended-linear descriptions declare a separate BT.2020 target vo
 80-nit peak for SDR content and a 10,000-nit peak for HDR content. Both descriptions preserve the
 surface's sRGB primaries, linear encoding, and reference white. This requires the compositor's
 `set_mastering_display_primaries` and `extended_target_volume` features; otherwise the backend uses
-the Windows-scRGB fallback when available.
+the Windows-scRGB fallback when available. If neither scRGB description is supported, it tries
+BT.2020 primaries with the PQ transfer function, using a 10-bit buffer with fp16 as a fallback.
+PQ uses the protocol's 203-nit reference white and 10,000-nit encoding maximum. Skia maps ordinary
+SDR white to the reference white, preserving the remaining range for HDR highlights.
+
+Skia composes PQ windows in the retained FP16 scRGB layer. Video, text, transparency, and effects
+operate in linear light, preserving negative and above-white components until the final draw
+converts the layer to BT.2020 PQ. The final draw requests dithering for 10-bit destinations.
+
+Custom drawing uses `ISkiaSharpApiLease.ColorFormat`, which reports `RgbaF16/ScRgbLinear` for this
+composition layer. Its `PreferredColorVolume.SurfaceNitsPerUnit` equals the reference white, so
+linear 1.0 represents diffuse white. The native presentation surface remains PQ-encoded, with
+HDR represented within `[0, 1]`.
 
 ### HDR content hint
 
@@ -78,7 +91,7 @@ native surface is recreated or the compositor reconnects. This is a binary conte
 measurement of each frame's peak. The compositor chooses and animates the available headroom;
 other HDR windows can keep it active on the same display.
 
-The Windows-scRGB fallback has a fixed description and does not change its range in response to
+The Windows-scRGB and PQ fallbacks have fixed descriptions and do not change their range in response to
 this hint. See [HDR content hints](../../docs/hdr-content-hints.md) for the Android implementation
 and Windows API limitations.
 
@@ -95,6 +108,9 @@ plus the reference white and `target_luminance` the actually displayable range, 
 peak. Both minimums are scaled by 10000 in the protocol, the other values are plain cd/m². The
 result surfaces as `PlatformSurfaceColorVolume` through the `IPlatformSurfaceColorVolumeFeature`
 top level feature and, snapshotted per frame, on `ISkiaSharpApiLease.PreferredColorVolume`.
+
+The preferred volume is compositor metadata, not a display calibration measurement. A compositor
+can report a nominal encoding range instead of the panel's physical peak luminance.
 
 The same round trip carries `tf_named`/`tf_power`, reported as `PlatformSurfaceColorVolume.Transfer`.
 That is the curve the compositor encodes this surface's content with on the way to the display, and
@@ -115,6 +131,11 @@ compositor re-anchors its reference white to the display's and numeric 1.0 arriv
 the Windows-scRGB fallback instead pins 1.0 to 80 cd/m² whatever the display is set to, and content
 has to be scaled up to compensate. The DWM does the same on an HDR display, which is why the value
 exists at all rather than being assumed to be the reference white.
+
+For the native PQ surface, numeric 1.0 corresponds to the 10,000-nit encoding maximum, scaled by
+the display's reference white relative to the description's 203 nits. The scRGB composition layer
+instead reports reference-white-relative units through its Skia lease. The final color conversion
+maps its linear white to the PQ description's reference white.
 
 ### NWayland pitfalls hit here
 

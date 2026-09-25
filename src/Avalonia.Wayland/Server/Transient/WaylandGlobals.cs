@@ -273,7 +273,7 @@ class WaylandGlobals
         PlatformColorSpace colorSpace) => mode switch
     {
         // scRGB is only meaningful with a float encoding that can hold values outside of [0, 1].
-        WaylandColorMode.ExtendedLinear =>
+        WaylandColorMode.ExtendedLinear when colorSpace == PlatformColorSpace.ScRgbLinear =>
         [
             EglColorBufferFormat.Float16(colorSpace),
             EglColorBufferFormat.Standard

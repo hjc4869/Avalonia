@@ -149,17 +149,26 @@ namespace Avalonia.Skia
         {
             var context = (DrawingContextImpl)contextImpl;
 
-            if (_surface.CanBlit)
+            if (_surface.CanBlit && _colorFormat == context.ColorFormat)
             {
                 _surface.Surface.Canvas.Flush();
                 _surface.Blit(context.Canvas);
             }
             else
             {
+                using var paint = context.ColorFormat.ColorSpace == PlatformColorSpace.Rec2020Pq
+                    ? new SKPaint { IsDither = context.ColorFormat.Encoding == PlatformPixelEncoding.Rgba1010102 }
+                    : null;
                 var oldMatrix = context.Canvas.TotalMatrix;
-                context.Canvas.ResetMatrix();
-                _surface.Surface.Draw(context.Canvas, 0, 0, null);
-                context.Canvas.SetMatrix(oldMatrix);
+                try
+                {
+                    context.Canvas.ResetMatrix();
+                    _surface.Surface.Draw(context.Canvas, 0, 0, paint);
+                }
+                finally
+                {
+                    context.Canvas.SetMatrix(oldMatrix);
+                }
             }
         }
 
