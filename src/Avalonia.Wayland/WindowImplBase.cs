@@ -225,6 +225,7 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
                 return;
             IsDisposed = true;
             StopKeyRepeat();
+            _scrollInertia = null;
             DisconnectFromSurface();
         }
 

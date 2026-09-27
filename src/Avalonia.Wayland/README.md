@@ -181,6 +181,13 @@ The final active axis's `wl_pointer.axis_stop` emits an `Ended` event with zero 
 can settle immediately on release. Stopping only one axis keeps the sequence active. Leaving the
 surface or starting a pinch cancels an active scroll sequence. Mouse wheel events use `None`.
 
+After finger release, Wayland generates frame-paced `Inertia` wheel events using the touchscreen
+scroll recognizer's velocity estimator, velocity limits, resistance, and stopping speed. Estimation
+uses DIPs (50 per wheel unit), preserving the existing wheel-delta scale. A release more than 200 ms
+after the last movement does not start inertia. New scrolling, pointer movement, buttons, touch,
+pinch, surface leave, or surface disposal cancels momentum; unhandled scrolling also stops it.
+Mouse wheels and pinch translation do not generate inertia.
+
 Native pinch input uses `zwp_pointer_gestures_v1` versions 1 through 2. Each pointer owns a pinch
 listener, and gestures target the surface supplied by the begin event. The absolute protocol scale
 is converted into incremental `PointerTouchPadGestureMagnify` deltas: multiplying the current scale
