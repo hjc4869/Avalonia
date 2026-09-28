@@ -239,16 +239,9 @@ internal class BrowserInputHandler
                && dropEffect != DragDropEffects.None;
     }
 
-    public bool OnKeyDown(string code, string key, int modifier)
+    public bool OnKeyDown(string code, string key, int modifier, bool isTextInput)
     {
-        var handled = RawKeyboardEvent(RawKeyEventType.KeyDown, code, key, (RawInputModifiers)modifier);
-
-        if (!handled && key.Length == 1)
-        {
-            handled = RawTextEvent(key);
-        }
-
-        return handled;
+        return RawKeyboardEvent(RawKeyEventType.KeyDown, code, key, (RawInputModifiers)modifier, isTextInput);
     }
 
     public bool OnKeyUp(string code, string key, int modifier)
@@ -315,7 +308,8 @@ internal class BrowserInputHandler
         return false;
     }
 
-    private bool RawKeyboardEvent(RawKeyEventType type, string domCode, string domKey, RawInputModifiers modifiers)
+    private bool RawKeyboardEvent(RawKeyEventType type, string domCode, string domKey, RawInputModifiers modifiers,
+        bool isTextInput = false)
     {
         if (_inputRoot is null)
             return false;
@@ -324,7 +318,7 @@ internal class BrowserInputHandler
         var key = KeyInterop.KeyFromDomKey(domKey, physicalKey);
         var keySymbol = KeyInterop.KeySymbolFromDomKey(domKey);
 
-        var args = new RawKeyEventArgs(
+        var args = new BrowserRawKeyEventArgs(
             BrowserWindowingPlatform.Keyboard,
             Timestamp,
             _inputRoot,
@@ -332,7 +326,8 @@ internal class BrowserInputHandler
             key,
             modifiers,
             physicalKey,
-            keySymbol
+            keySymbol,
+            isTextInput
         );
 
         ScheduleInput(args);
@@ -381,5 +376,27 @@ internal class BrowserInputHandler
             return;
 
         _topLevelImpl.Input?.Invoke(args);
+
+        if (args is BrowserRawKeyEventArgs { Handled: false, IsTextInput: true, KeySymbol: { } text })
+        {
+            var textArgs = new RawTextInputEventArgs(BrowserWindowingPlatform.Keyboard, args.Timestamp, _inputRoot, text);
+            _topLevelImpl.Input?.Invoke(textArgs);
+            args.Handled = textArgs.Handled;
+        }
+    }
+
+    private sealed class BrowserRawKeyEventArgs(
+        IInputDevice device,
+        ulong timestamp,
+        IInputRoot root,
+        RawKeyEventType type,
+        Key key,
+        RawInputModifiers modifiers,
+        PhysicalKey physicalKey,
+        string? keySymbol,
+        bool isTextInput)
+        : RawKeyEventArgs(device, timestamp, root, type, key, modifiers, physicalKey, keySymbol)
+    {
+        public bool IsTextInput { get; } = isTextInput;
     }
 }
