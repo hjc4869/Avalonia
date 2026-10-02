@@ -427,8 +427,12 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl
                 && !double.IsPositiveInfinity(s.Height)
                 ? s
                 : (Size?)null;
-        _minSize = Normalize(minSize);
-        _maxSize = Normalize(maxSize);
+            var normalizedMinSize = Normalize(minSize);
+            var normalizedMaxSize = Normalize(maxSize);
+            if (_minSize == normalizedMinSize && _maxSize == normalizedMaxSize)
+                return;
+            _minSize = normalizedMinSize;
+            _maxSize = normalizedMaxSize;
         _surfaceProxy?.SetMinMaxSize(_minSize, _maxSize);
     }
 
