@@ -228,6 +228,16 @@ Entities bound to a connection defined in Server/Transient dir, they should be c
 Since wayland asks us nicely to NOT render when we want to, but instead tells us when to, the render timer is not an actual
 timer, but something that gets triggered by frame callbacks. So if we expect the render timer to do something useful 
 for e. g. new surface, we need to wake it up explicitly.
+
+Ordinary composition wakeups are coalesced and handled on the Wayland worker. Mapped surfaces request a frame callback,
+reusing an outstanding request when possible. A callback-only commit does not attach another buffer or force a redraw.
+Render tasks that request another tick keep these callbacks active even when the current tick has no new pixels to submit.
+Once no task needs another tick, the loop stops requesting callbacks.
+
+With no mapped surface, composition work can run immediately. Native platform jobs can also wake the loop immediately.
+Batches deferred for a frame callback arm the starvation timer, including out-of-band disposal batches. This lets an
+occluded window make bounded progress even when the compositor withholds its frame callbacks. Frame requests use the
+surface's out-of-band commit guard, so they do not commit an unconfigured xdg surface.
 For inevitable oversights there is currently a "fallback" timer that ticks at 20FPS, but it should be removed once
 we are sure that all the cases are covered (this will likely require some refactoring of UI thread's animation engine).
 

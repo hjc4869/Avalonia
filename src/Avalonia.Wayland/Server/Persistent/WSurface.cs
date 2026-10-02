@@ -285,6 +285,20 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
 
     public bool IsFrameCallbackPending => _frameCallback != null;
 
+    public bool EnsureFrameCallback()
+    {
+        if (WlSurface == null || !CanCommitOutOfBand)
+            return false;
+
+        if (_frameCallback == null)
+        {
+            _frameCallback = WlSurface.Frame(new FrameListener(this));
+            WlSurface.Commit();
+        }
+
+        return true;
+    }
+
     public virtual PlatformRenderTargetState State =>
         (Globals != null && WlSurface != null && !IsFrameCallbackPending) ? PlatformRenderTargetState.Ready : default;
 
