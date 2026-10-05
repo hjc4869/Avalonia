@@ -274,8 +274,25 @@ internal class TopLevelImpl : ITopLevelImpl, IFramebufferPlatformSurface,
         switch (type)
         {
             case AvnRawMouseEventType.Wheel:
+            case AvnRawMouseEventType.TouchpadScroll:
+            case AvnRawMouseEventType.TouchpadScrollBegan:
+            case AvnRawMouseEventType.TouchpadScrollEnded:
+            case AvnRawMouseEventType.TouchpadScrollCancelled:
+            case AvnRawMouseEventType.TouchpadScrollInertia:
                 Input?.Invoke(new RawMouseWheelEventArgs(_mouse, timeStamp, _inputRoot,
-                    point.ToAvaloniaPoint(), new Vector(delta.X, delta.Y), (RawInputModifiers)modifiers));
+                    point.ToAvaloniaPoint(), new Vector(delta.X, delta.Y), (RawInputModifiers)modifiers)
+                {
+                    IsTouchpad = type != AvnRawMouseEventType.Wheel,
+                    GesturePhase = type switch
+                    {
+                        AvnRawMouseEventType.TouchpadScroll => TouchpadGesturePhase.Changed,
+                        AvnRawMouseEventType.TouchpadScrollBegan => TouchpadGesturePhase.Began,
+                        AvnRawMouseEventType.TouchpadScrollEnded => TouchpadGesturePhase.Ended,
+                        AvnRawMouseEventType.TouchpadScrollCancelled => TouchpadGesturePhase.Cancelled,
+                        AvnRawMouseEventType.TouchpadScrollInertia => TouchpadGesturePhase.Inertia,
+                        _ => TouchpadGesturePhase.None
+                    }
+                });
                 break;
 
             case AvnRawMouseEventType.Magnify:
