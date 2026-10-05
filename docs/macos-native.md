@@ -25,6 +25,21 @@ public static AppBuilder BuildAvaloniaApp() =>
     })
 ```
 
+## Color Management And HDR
+
+The macOS backend defaults to color-managed sRGB on Metal, OpenGL and software surfaces.
+For SDR wide gamut and HDR on the same drawing surface, select
+`AvaloniaNativePlatformOptions.ColorMode = AvaloniaNativeColorMode.ExtendedLinear`.
+Metal on macOS 10.15 or later uses an FP16 extended-linear sRGB layer; other renderers fall back
+to color-managed SDR. Use `IPlatformHdrContentFeature` to declare visible HDR content, and the
+session's actual color format and color-volume snapshot to choose rendering policy.
+
+The implementation reports relative current/potential EDR headroom, not absolute display nits.
+It uses client tone mapping; the content hint does not install native tone-mapping metadata.
+See the [HDR surface API](hdr-api-design.md#macos-presentation) and
+[HDR content hints](hdr-content-hints.md#macos) for the contract, options and validation commands.
+Native/managed interop changes must be deployed together with the rebuilt native library.
+
 # Bundling Development Code
 
 In certain situations you need to run an Avalonia sample application as an app bundle. One of these situations is testing macOS Accessibility - Xcode's Accessibility Inspector fails to recognise the application otherwise. To facilitate this, the [`IntegrationTestApp`](../samples/IntegrationTestApp/) has a [`bundle.sh`](../samples/IntegrationTestApp/bundle.sh) script which can be run to create a bundle of that application.

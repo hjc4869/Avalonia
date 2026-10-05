@@ -16,6 +16,7 @@ using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Platform.Surfaces;
 using Avalonia.Rendering.Composition;
+using Avalonia.Threading;
 using CoreAnimation;
 using Foundation;
 using ObjCRuntime;
@@ -41,8 +42,10 @@ namespace Avalonia.iOS
         private TextInputMethodClient? _client;
         private IAvaloniaViewController? _controller;
         private IInputRoot? _inputRoot;
+        private Metal.MetalPlatformSurface? _metalSurface;
         private Metal.MetalRenderTarget? _currentRenderTarget;
         private (PixelSize size, double scaling) _latestLayoutProps;
+        private bool _colorVolumeInvalidationQueued;
         private bool _disposedValue;
 
         public AvaloniaView()
@@ -117,8 +120,32 @@ namespace Avalonia.iOS
             if (l is CAMetalLayer metalLayer)
             {
                 metalLayer.Opaque = false;
-                _topLevelImpl.Surfaces = [new Metal.MetalPlatformSurface(metalLayer, this)];
+                _metalSurface = new Metal.MetalPlatformSurface(metalLayer, this);
+                _metalSurface.PreferredColorVolumeChanged += OnColorVolumeChanged;
+                _topLevelImpl.Surfaces = [_metalSurface];
+                _metalSurface.UpdateScreen();
             }
+        }
+
+        private void OnColorVolumeChanged(object? sender, EventArgs args)
+        {
+            if (_colorVolumeInvalidationQueued || _disposedValue)
+                return;
+
+            _colorVolumeInvalidationQueued = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                _colorVolumeInvalidationQueued = false;
+                if (!_disposedValue)
+                    _topLevelImpl.Paint?.Invoke(new Rect(_topLevelImpl.ClientSize));
+            }, DispatcherPriority.Render);
+        }
+
+        /// <inheritdoc />
+        public override void MovedToWindow()
+        {
+            base.MovedToWindow();
+            _metalSurface?.UpdateScreen();
         }
 
         /// <inheritdoc />
@@ -140,6 +167,7 @@ namespace Avalonia.iOS
 
             var settings = AvaloniaLocator.Current.GetRequiredService<IPlatformSettings>() as PlatformSettings;
             settings?.TraitCollectionDidChange();
+            _metalSurface?.RefreshColorVolume();
         }
 
         /// <inheritdoc />
@@ -282,6 +310,12 @@ namespace Avalonia.iOS
 
             public object? TryGetFeature(Type featureType)
             {
+                if (featureType == typeof(IPlatformSurfaceColorVolumeFeature) ||
+                    featureType == typeof(IPlatformHdrContentFeature))
+                {
+                    return _view._metalSurface;
+                }
+
                 if (featureType == typeof(ITextInputMethodImpl))
                 {
                     return _view;
@@ -410,6 +444,7 @@ namespace Avalonia.iOS
                 _currentRenderTarget.PendingLayout = _latestLayoutProps;
             }
 
+            _metalSurface?.RefreshColorVolume();
             base.LayoutSubviews();
         }
 
@@ -433,6 +468,8 @@ namespace Avalonia.iOS
 
                 if (disposing)
                 {
+                    _metalSurface?.Dispose();
+                    _metalSurface = null;
                     _accessWrapper.Dispose();
                     _topLevel.Dispose();
                 }

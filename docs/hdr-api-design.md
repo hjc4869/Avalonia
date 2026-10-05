@@ -170,6 +170,7 @@ The hint neither toggles display-wide HDR settings nor promises headroom. Suppor
 
 | Backend | Metadata handling |
 | --- | --- |
+| macOS / iOS / Mac Catalyst Metal extended-linear | The boolean requests `CAMetalLayer.wantsExtendedDynamicRangeContent`. Source metadata is normalized and retained but does not install `CAEDRMetadata` or change the client-mapped contract. |
 | Android | `HeadroomRatio` requests native desired headroom, capped at 10,000. Unknown ratio uses automatic selection (0); false requests 1. Source white/mastering nits are retained but not used by this path. |
 | Wayland parametric linear/PQ | When mastering metadata is supported, create a per-surface description with source mastering range and content light level in the native encoding's white scale. Preserve the drawing format and selected intent. |
 | Wayland Windows-scRGB | Fixed native description; source metadata is retained but cannot alter its range. |
@@ -192,6 +193,82 @@ UI thread when the snapshot changes; rendering is invalidated and retained compo
 are recreated when their color-volume snapshot changes. Display migration, configuration,
 permissions, surface lifecycle and asynchronous native headroom updates can all cause changes.
 See [HDR content hints](hdr-content-hints.md) for backend details.
+
+## macOS presentation
+
+macOS defaults to color-managed 8-bit sRGB, including Metal, OpenGL and software rendering.
+Metal layers have an explicit sRGB color space; OpenGL/software IOSurfaces carry an sRGB
+attachment. Skia also receives that color space, so ordinary sRGB content is converted by
+ColorSync instead of being interpreted in the display's native gamut.
+
+```csharp
+builder.With(new AvaloniaNativePlatformOptions
+{
+  ColorMode = AvaloniaNativeColorMode.ExtendedLinear
+});
+```
+
+On macOS 10.15 or later, Metal uses `MTLPixelFormatRGBA16Float` and
+`kCGColorSpaceExtendedLinearSRGB`. This single `RgbaF16/ScRgbLinear` drawing surface supports
+SDR sRGB, SDR wide gamut, laptop EDR and HDR-capable external displays together. The system
+selects the physical display encoding; applications do not write PQ or HLG into this surface.
+OpenGL, software and older-system fallbacks remain color-managed SDR. Inspect the session's
+actual format, not just the startup request.
+
+The default false content hint leaves wide gamut available without requesting extra brightness.
+True enables extended brightness on the layer without changing its format or reference white.
+Current headroom then follows `NSScreen.maximumExtendedDynamicRangeColorComponentValue`;
+potential headroom comes independently from
+`maximumPotentialExtendedDynamicRangeColorComponentValue`. With the hint off, the surface
+reports current headroom 1, retaining the display's potential ratio. An unattached HDR surface
+has unknown current headroom until its screen is known. Standard surfaces report both ratios as 1.
+
+The relative white scale is 1. No absolute display white, peak, black or nits-per-unit is inferred.
+`CAMetalLayer.EDRMetadata` remains unset, so values above current headroom may be clipped:
+`ToneMapping` is `Client`, not `Platform`. Fit highlights using current headroom even while a
+request is pending; never substitute potential headroom. Source mastering metadata does not
+configure the display or enable a second tone mapper.
+
+Screen/headroom/profile notifications, window screen and visibility changes, backing-property
+changes and view attachment refresh the report on the UI thread. Each native Metal session
+captures a coherent snapshot, and color-volume changes schedule a repaint without re-entering
+the compositor. Intent survives render-target recreation. iOS shares the managed Metal color
+contract and Skia path, with separate UIKit headroom and lifecycle handling as described below.
+
+## iOS and iPadOS presentation
+
+Metal defaults to explicitly tagged, color-managed 8-bit sRGB. Opt in to WCG/EDR with:
+
+```csharp
+builder.With(new iOSPlatformOptions
+{
+  ColorMode = iOSColorMode.ExtendedLinear
+});
+```
+
+On iOS/iPadOS and Mac Catalyst 16 or later, Metal uses `MTLPixelFormatRGBA16Float` with
+`kCGColorSpaceExtendedLinearSRGB`. As on macOS, the same `RgbaF16/ScRgbLinear` surface holds
+SDR wide gamut and HDR. White is 1; negative and above-one components are meaningful. The default
+false content hint leaves the FP16 format and wide gamut available without requesting extended
+brightness. True requests EDR on the layer; source metadata is normalized and retained but never
+installed as `CAEDRMetadata`. The contract remains `Client`, with no inferred absolute luminance.
+
+The attached window's screen supplies `UIScreen.currentEDRHeadroom` and, independently,
+`potentialEDRHeadroom`. Current headroom is 1 while the hint is false. With no attached screen,
+both ratios are unknown. Invalid native ratios follow the shared normalization rules; potential
+headroom never substitutes for unknown current headroom. Accepting a hint is not a headroom grant.
+
+A main-thread display link samples headroom while the view is attached and the application is
+active, including when Avalonia content is otherwise static. Attachment, layout, trait changes
+and application activation also refresh the report. Detachment and disposal release polling and
+observers; application inactivity suspends polling. The render thread only reads atomically
+published snapshots, and each Metal session captures one immutable snapshot. Changes raise the
+top-level feature's event on the UI thread and schedule a repaint without compositor re-entry.
+Intent and source metadata belong to the surface and survive render-target recreation.
+
+Earlier systems and tvOS Metal use color-managed sRGB with a fixed SDR report. Apple's Metal EDR
+request API is unavailable on tvOS. OpenGL retains its existing SDR path without the optional
+color-volume/content-hint features. Inspect the session's actual format, not just the option.
 
 ## Wayland presentation preferences
 
@@ -228,8 +305,8 @@ The selected mode and fallback reasons are logged under `Wayland`.
 
 These are startup preferences, retried when the connection is recreated, not guaranteed modes or
 display-setting overrides. HDR is implemented for the WSI rendering path; the dmabuf rendering
-path remains SDR. Windows and Android retain their `ColorMode` opt-ins, and browser retains
-`PreferHdr`. No unsupported native transports or Apple HDR modes are exposed as options.
+path remains SDR. Windows, macOS, iOS and Android retain their `ColorMode` opt-ins, and browser retains
+`PreferHdr`. macOS does not expose separate native PQ/HLG transports or a platform tone-mapping mode.
 
 ## Platform values
 
@@ -243,7 +320,9 @@ luminance endpoints are independent. Native capabilities are not instantaneous p
 | Android extended-linear EGL, API 35+ | EGL encoding reference 0..80 | null | Valid `HdrCapabilities` desired min/max; optional and independent of the current ratio | `DisplayReported` for valid target, else `Unknown` | null |
 | Browser extended canvas | null | null | null | `Unknown` | null |
 | Wayland managed surface | Native preferred `luminances` min/max, if received | Native preferred reference luminance, if received | Native preferred `target_luminance`, if received | `Nominal` for received white/target, else `Unknown` | 80 for Windows-scRGB; null for relative linear/PQ composition |
-| macOS / iOS / iPadOS | No HDR report | No HDR report | No HDR report | No HDR report | No HDR report |
+| macOS color-managed output | null | null | null | `Unknown` | null |
+| iOS / iPadOS / Mac Catalyst / tvOS Metal | null | null | null | `Unknown` | null |
+| iOS / tvOS OpenGL | No HDR report | No HDR report | No HDR report | No HDR report | No HDR report |
 | X11/XWayland, framebuffer/DRM, unmanaged Wayland and other unsupported paths | No HDR report | No HDR report | No HDR report | No HDR report | No HDR report |
 
 | Environment | `ReferenceWhiteScale` | `HeadroomRatio` | `MaximumHeadroomRatio` | `ToneMapping` | Updates |
@@ -255,7 +334,11 @@ luminance endpoints are independent. Native capabilities are not instantaneous p
 | Browser extended canvas | 1 | `2^ScreenDetailed.hdrHeadroom` for a valid permission-gated native reading, else null | Same as current ratio | `Client` | Current screen, headroom, permission and initial canvas negotiation; worker-safe snapshots |
 | Wayland reference-white-relative linear/PQ | 1 | Relative intent: `max(1, target peak / reference white)` with valid feedback; otherwise null. Perceptual: null | Same as current ratio | Relative intent: `Client`; perceptual: `Platform` | Preferred-description completion, surface lifecycle and reconnect |
 | Wayland fixed Windows-scRGB | null; no measured diffuse-white mapping | Same relative/perceptual rule as above | Same as current ratio | Relative intent: `Client`; perceptual: `Platform` | Same as above |
-| macOS / iOS / iPadOS and unsupported paths | No HDR report | No HDR report | No HDR report | No HDR report | No HDR feature implementation |
+| macOS Metal extended-linear | 1 | Native current EDR ratio when the hint is true; 1 when false; null for unavailable/invalid native readings | Native potential EDR ratio, otherwise current ratio | `Client` | Screen/headroom/profile notifications, window migration/visibility, backing properties, attachment and surface recreation |
+| macOS standard/OpenGL/software | 1 | 1 | 1 | `Client` | Fixed SDR contract |
+| iOS / iPadOS / Mac Catalyst 16+ Metal extended-linear | 1 | Attached screen's current EDR ratio when the hint is true; 1 when false; null when detached or the native reading is invalid | Attached screen's potential EDR ratio, otherwise current ratio | `Client` | Main-thread display-link polling, attachment, layout, traits and application activation |
+| iOS / iPadOS / Mac Catalyst standard Metal and tvOS Metal | 1 | 1 | 1 | `Client` | Fixed SDR contract |
+| iOS / tvOS OpenGL and unsupported paths | No HDR report | No HDR report | No HDR report | No HDR report | No HDR feature implementation |
 
 Browser SDR fallback reports no HDR volume, even on an HDR-capable screen. Permission loss clears
 headroom but retains a negotiated extended canvas's known scale and mapping policy. A reported
@@ -284,7 +367,11 @@ does not enable the API-35-gated Avalonia presentation path.
 | Android | Mapped preferred wide-gamut color space, otherwise `Unknown` | Native/known exponent for `Power`; 0 otherwise |
 | Browser extended canvas | `Linear`, the browser-side encoding, not a panel EOTF measurement | 0 |
 | Wayland | Mapped `tf_named`, or `Power` from `tf_power`; absent/ICC-only is `Unknown` | Protocol exponent / 10000, or known named power; 0 otherwise |
-| Apple and unsupported HDR backends | No HDR report | No HDR report |
+| macOS Metal extended-linear | `Linear`, the drawing/layer encoding, not a panel EOTF measurement | 0 |
+| macOS standard/OpenGL/software | `Srgb` | 0 |
+| iOS / iPadOS / Mac Catalyst Metal extended-linear | `Linear`, the drawing/layer encoding, not a panel EOTF measurement | 0 |
+| iOS / iPadOS / Mac Catalyst standard Metal and tvOS Metal | `Srgb` | 0 |
+| iOS / tvOS OpenGL and unsupported HDR backends | No HDR report | No HDR report |
 
 ## Demo and validation
 
@@ -302,6 +389,17 @@ dotnet run --project samples/WideColorGamutDemo -c Release -- --hdr=LinearPercep
 dotnet run --project samples/WideColorGamutDemo -c Release -- --hdr=PqRelative --self-test
 dotnet run --project samples/WideColorGamutDemo -c Release -- --hdr=Sdr,LinearPerceptual --self-test
 ```
+
+On macOS:
+
+```sh
+dotnet run --project samples/WideColorGamutDemo -- --self-test
+dotnet run --project samples/WideColorGamutDemo -- extendedlinear --renderer=Metal --self-test
+dotnet run --project samples/WideColorGamutDemo -- extendedlinear --renderer=OpenGl --self-test
+dotnet run --project samples/WideColorGamutDemo -- extendedlinear --renderer=Software --self-test
+```
+
+`--renderer=` is a macOS-only test override. `--hdr=` remains a Wayland preference list.
 
 `--hdr=` selects an empty list; `extendedlinear` selects the default HDR order. `--dmabuf` exercises
 the SDR dmabuf path. `--self-test` changes controls through seven timed steps, verifies reference
@@ -323,10 +421,35 @@ Live validation on KDE/KWin 6.7.4, Mesa 26.1.6, AMD Radeon 8060S, with HDR alrea
 This validates negotiation, reporting, input pixels and protocol behavior, not calibrated emitted
 luminance or perceptual mapper quality. SDR screenshots cannot prove HDR brightness. Physical
 Android/Windows display transitions, compositor reconnects and multi-monitor behavior still need
-device validation; Apple HDR is not implemented.
+device validation.
+
+Live macOS validation used the native Metal, OpenGL and software renderers on Apple Silicon:
+
+- Metal standard, OpenGL fallback and software fallback each passed seven timed SDR pixel checks.
+- Metal extended-linear passed the HDR hint and metadata transitions, including asynchronous
+  native current-headroom updates. White stayed at 1; Display P3/Rec.2020 primaries retained negative
+  and above-one components. The explicit 4x test peak survived the FP16 drawing surface.
+- Disabling the hint returned the current contract to 1 while retaining approximately 6x potential
+  headroom and the FP16 wide-gamut format. No global display/brightness settings were changed.
+- Native color-report/snapshot tests and the full Skia unit suite passed.
+
+These checks cover native negotiation, color contracts and input pixels, not calibrated emitted
+luminance. External HDR/SDR display migration, brightness/reference-mode changes and Intel GPUs
+still need device coverage.
+
+The iOS implementation has managed-build and shared Metal/Skia unit-test coverage. Native runtime
+and physical-device validation remain required, including hint transitions, FP16 pixel readback,
+display migration, rotation and background/resume. A local iOS 27 simulator probe did not reach
+its test callbacks, so it provides no runtime-validation evidence. Mac Catalyst and tvOS target
+builds also require their respective workloads. See [iOS device verification](hdr-content-hints.md#ios-device-verification).
 
 ## Native references
 
+- [Metal extended dynamic range rendering](https://developer.apple.com/documentation/metal/processing-hdr-images-with-metal),
+  [CAMetalLayer](https://developer.apple.com/documentation/quartzcore/cametallayer), and
+  [NSScreen EDR headroom](https://developer.apple.com/documentation/appkit/nsscreen/maximumextendeddynamicrangecolorcomponentvalue).
+- [UIScreen current EDR headroom](https://developer.apple.com/documentation/uikit/uiscreen/currentedrheadroom) and
+  [potential EDR headroom](https://developer.apple.com/documentation/uikit/uiscreen/potentialedrheadroom).
 - [Windows Advanced Color and application tone mapping](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/high-dynamic-range).
 - [Android Display ratios](https://developer.android.com/reference/android/view/Display),
   [HDR capabilities](https://developer.android.com/reference/android/view/Display.HdrCapabilities), and

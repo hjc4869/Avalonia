@@ -54,6 +54,24 @@ internal static class Program
                 });
             builder = builder.UseWin32();
         }
+        else if (OperatingSystem.IsMacOS())
+        {
+            var options = new AvaloniaNativePlatformOptions
+            {
+                ColorMode = extended ? AvaloniaNativeColorMode.ExtendedLinear : AvaloniaNativeColorMode.Standard
+            };
+            var rendererOption = args.FirstOrDefault(arg => arg.StartsWith("--renderer=", StringComparison.Ordinal));
+            if (rendererOption is not null)
+            {
+                if (!Enum.TryParse<AvaloniaNativeRenderingMode>(rendererOption[11..], true, out var renderer) ||
+                    !Enum.IsDefined(renderer))
+                    throw new ArgumentException($"Unknown macOS renderer: {rendererOption[11..]}");
+                options.RenderingMode = [renderer];
+            }
+            Console.WriteLine($"[demo] macOS renderer preference: {string.Join(", ", options.RenderingMode)}");
+            AvaloniaLocator.CurrentMutable.Bind<AvaloniaNativePlatformOptions>().ToConstant(options);
+            builder = builder.UseAvaloniaNative();
+        }
         else
         {
             AvaloniaLocator.CurrentMutable.Bind<WaylandPlatformOptions>()

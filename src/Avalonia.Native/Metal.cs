@@ -14,14 +14,16 @@ class MetalPlatformGraphics : IPlatformGraphics
 {
     private readonly IAvaloniaNativeFactory _factory;
     private readonly IAvnMetalDisplay _display;
+    private readonly AvaloniaNativeColorMode _colorMode;
 
-    public MetalPlatformGraphics(IAvaloniaNativeFactory factory)
+    public MetalPlatformGraphics(IAvaloniaNativeFactory factory, AvaloniaNativeColorMode colorMode)
     {
         _factory = factory;
         _display = factory.ObtainMetalDisplay();
+        _colorMode = colorMode;
     }
     public bool UsesSharedContext => false;
-    public IPlatformGraphicsContext CreateContext() => new MetalDevice(_factory, _display.CreateDevice());
+    public IPlatformGraphicsContext CreateContext() => new MetalDevice(_factory, _display.CreateDevice(), _colorMode);
 
     public IPlatformGraphicsContext GetSharedContext() => throw new NotSupportedException();
 }
@@ -33,12 +35,15 @@ class MetalDevice : IMetalDevice
     private readonly MetalExternalObjectsFeature _externalObjectsFeature;
     private IAvnMetalDevice? _native;
 
-    public MetalDevice(IAvaloniaNativeFactory factory, IAvnMetalDevice native)
+    public MetalDevice(IAvaloniaNativeFactory factory, IAvnMetalDevice native, AvaloniaNativeColorMode colorMode)
     {
         _native = native;
+        ColorMode = colorMode;
         _handleWrapFeature = new GpuHandleWrapFeature(factory);
         _externalObjectsFeature = new MetalExternalObjectsFeature(native);
     }
+
+    public AvaloniaNativeColorMode ColorMode { get; }
 
     public IAvnMetalDevice Native
     {
@@ -86,7 +91,8 @@ class MetalPlatformSurface : IMetalPlatformSurface
             throw new RenderTargetNotReadyException();
         
         var dev = (MetalDevice)device;
-        var target = _topLevel.CreateMetalRenderTarget(dev.Native);
+        var target = _topLevel.CreateMetalRenderTarget(dev.Native,
+            dev.ColorMode == AvaloniaNativeColorMode.ExtendedLinear ? 1 : 0);
         return new MetalRenderTarget(target);
     }
 }
@@ -201,6 +207,8 @@ internal class MetalRenderTarget : IMetalPlatformSurfaceRenderTarget
         var session = Native.BeginDrawing();
         return new MetalDrawingSession(session);
     }
+
+    public PlatformSurfaceColorFormat ColorFormat => MacOSColorVolume.GetColorFormat(Native.PixelFormat);
 }
 
 internal class MetalDrawingSession : IMetalPlatformSurfaceRenderingSession
@@ -210,6 +218,9 @@ internal class MetalDrawingSession : IMetalPlatformSurfaceRenderingSession
     public MetalDrawingSession(IAvnMetalRenderingSession session)
     {
         _session = session;
+        var info = session.ColorInfo;
+        ColorFormat = MacOSColorVolume.GetColorFormat(info.PixelFormat);
+        PreferredColorVolume = MacOSColorVolume.FromNative(info);
     }
 
     public IAvnMetalRenderingSession Session
@@ -241,4 +252,7 @@ internal class MetalDrawingSession : IMetalPlatformSurfaceRenderingSession
     public double Scaling => Session.Scaling;
 
     public bool IsYFlipped => false;
+
+    public PlatformSurfaceColorFormat ColorFormat { get; }
+    public PlatformSurfaceColorVolume? PreferredColorVolume { get; }
 }

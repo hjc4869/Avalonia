@@ -11,7 +11,7 @@ public enum PlatformColorSpace : byte
     /// <summary>
     /// The surface is not color managed: 8 bit sRGB-encoded values are handed to the display untouched
     /// and no conversion is applied to any drawing operation. This is Avalonia's historical behaviour
-    /// and remains the default.
+    /// and is used when a backend does not report a color-managed format.
     /// </summary>
     Unmanaged = 0,
 

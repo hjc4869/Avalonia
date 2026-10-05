@@ -36,6 +36,60 @@ potential ratio when available, otherwise it falls back to the current ratio. It
 grant or a render limit; equality with current headroom does not prove that more is impossible.
 Unknown ratios remain null. Other visible HDR surfaces and system policies can affect the result.
 
+## macOS
+
+Opt in with `AvaloniaNativePlatformOptions.ColorMode = AvaloniaNativeColorMode.ExtendedLinear`.
+Metal on macOS 10.15 or newer uses FP16 extended-linear sRGB for both SDR wide gamut and HDR.
+The default false hint does not request extended brightness; true sets
+`CAMetalLayer.wantsExtendedDynamicRangeContent`. Clearing it leaves the same FP16 surface and
+wide-gamut color space in place. Standard, OpenGL, software and older-system fallbacks remain
+color-managed sRGB; accepting a hint on those paths cannot activate HDR.
+
+The hint is retained and reapplied when a Metal render target is recreated. Source metadata is
+normalized and retained, including metadata-only changes, but is not submitted as `CAEDRMetadata`.
+This is intentionally a client-mapped, relative-white path: white is 1, and the client fits highlights
+to current headroom. Installing a native tone-mapping curve as well would change that contract.
+Source white/mastering nits are never substituted for display measurements.
+
+With the hint true, current headroom comes from the window screen's
+`maximumExtendedDynamicRangeColorComponentValue`. False reports a one-times surface target.
+Potential headroom is independently reported by
+`maximumPotentialExtendedDynamicRangeColorComponentValue` and is not a grant. Missing/invalid
+ratios remain unknown, with the standard current-ratio fallback for missing potential headroom.
+No absolute luminance is derived from these ratios.
+
+AppKit screen/profile, window migration/visibility, backing-property and attachment notifications
+refresh the snapshot. Events run on the UI thread; render sessions use a native cached snapshot
+without calling AppKit from the render thread. Native resource allocation may update current
+headroom asynchronously after a hint. Brightness, reference modes and other visible HDR content
+can affect it. No global display setting is changed.
+
+## iOS and iPadOS
+
+Opt in with `iOSPlatformOptions.ColorMode = iOSColorMode.ExtendedLinear`. Metal on iOS/iPadOS
+and Mac Catalyst 16 or newer uses FP16 extended-linear sRGB. The default false hint keeps wide
+gamut available without requesting EDR. True sets `CAMetalLayer.wantsExtendedDynamicRangeContent`;
+false clears it without changing the format or white scale. Older systems and tvOS Metal remain
+color-managed SDR. OpenGL retains its SDR path without these optional features.
+
+The client-mapped relative-white contract and normalization are shared with macOS: white is 1,
+`CAEDRMetadata` remains unset, and source metadata is retained rather than used as display data.
+Metadata-only changes are accepted, false clears metadata, and render-target recreation does not
+reset the surface's intent or source metadata. A hint on a standard Metal surface cannot enable HDR.
+
+The attached window's screen supplies `UIScreen.currentEDRHeadroom` when the hint is true and
+`potentialEDRHeadroom` independently. False reports current headroom 1 while attached. Detached
+extended surfaces have unknown current and potential headroom; no global main-screen reading is
+substituted. Native feedback is normalized without inventing nits or replacing current headroom
+with potential headroom.
+
+A main-thread display link polls native headroom while the view is attached and the application
+is active, so asynchronous changes repaint even otherwise static content. Attachment, layout,
+traits and activation also refresh the report. Inactivity stops polling; detachment and disposal
+release the link and application observers. Change events run on the UI thread and repainting is
+deferred to avoid compositor re-entry. Rendering sessions capture complete immutable snapshots
+without reading UIKit on the render thread. No display-wide brightness or HDR setting is changed.
+
 ## Android
 
 The feature is available when `AndroidColorMode.ExtendedLinear` successfully negotiates FP16 scRGB
@@ -111,3 +165,32 @@ automatic selection. Repeat after native
 surface recreation, rotation, and background/resume; check that other visible HDR surfaces can
 still keep the display's headroom active. Also check that standard/software fallbacks return no
 hint feature. Screenshots alone cannot verify emitted HDR luminance.
+
+## macOS device verification
+
+Run the [HDR probe](hdr-api-design.md#demo-and-validation) with `extendedlinear --self-test` on an
+EDR-capable Mac. Check that SDR/WCG uses the FP16 surface at white 1 before requesting HDR,
+that native current headroom updates after the hint, and that clearing it retains wide gamut
+while returning to a one-times target. Repeat with the default standard mode and the OpenGL
+and software renderer overrides; those paths must remain color-managed SDR.
+
+Move the window between HDR/WCG/SDR displays, change system brightness and reference modes,
+and hide/show or recreate the surface. Potential headroom must never replace current headroom;
+source metadata must not change reported nits or mapping ownership. Validate emitted highlights
+on the display itself; SDR screenshots and FP16 readbacks do not prove physical HDR luminance.
+
+## iOS device verification
+
+On an EDR-capable iPhone or iPad running iOS/iPadOS 16 or newer, opt in to extended-linear Metal.
+Check that the actual session reports FP16 linear sRGB at white 1 before setting a hint, and that
+SDR wide-gamut content retains negative and above-one components. Set the hint before waiting for
+headroom, observe native current/potential changes, update source metadata while true remains
+true, then clear the hint. Clearing must retain FP16 and wide gamut while reporting current
+headroom 1; no source nits may appear as display measurements.
+
+Repeat through render-target recreation, native view detach/reattach, rotation, external-display
+migration and application background/resume. A detached extended surface must not report the main
+screen's headroom, and an in-flight rendering session must retain its original snapshot. Verify
+that polling and observers are released on detach/disposal and resume on reattachment/activation.
+Check default standard Metal, older-system and tvOS fallbacks separately. Validate emitted HDR
+highlights on physical hardware; a simulator, SDR screenshot or FP16 readback alone is insufficient.

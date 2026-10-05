@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Avalonia.Native\Avalonia.Native.csproj" />
     <ProjectReference Include="..\..\src\Avalonia.Wayland\Avalonia.Wayland.csproj" />
     <ProjectReference Include="..\..\src\Windows\Avalonia.Win32\Avalonia.Win32.csproj" />
     <ProjectReference Include="..\..\src\Skia\Avalonia.Skia\Avalonia.Skia.csproj" />

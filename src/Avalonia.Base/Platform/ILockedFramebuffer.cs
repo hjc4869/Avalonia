@@ -33,5 +33,11 @@ namespace Avalonia.Platform
         /// Gets the alpha format.
         /// </summary>
         AlphaFormat AlphaFormat { get; }
+
+        /// <summary>The actual color encoding of the framebuffer; unmanaged by default.</summary>
+        PlatformSurfaceColorFormat ColorFormat => default;
+
+        /// <summary>The color-volume snapshot for this lock, or null when unavailable.</summary>
+        PlatformSurfaceColorVolume? PreferredColorVolume => null;
     }
 }
