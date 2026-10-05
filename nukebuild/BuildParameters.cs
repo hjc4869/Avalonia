@@ -119,7 +119,7 @@ public partial class Build
             
             if (IsRunningOnGitHubActions)
             {
-                if (!IsNuGetRelease)
+                if (!IsNuGetRelease && b.ForceNugetVersion is null)
                 {
                     // Use AssemblyVersion with Build as version
                     Version += "-cibuild" + GetCiBuildNumber().ToString("0000000") + "-alpha";

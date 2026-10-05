@@ -1,4 +1,4 @@
-# Building Local NuGet Packages
+# Building NuGet Packages
 
 To build NuGet packages, one can use the `CreateNugetPackages` target:
 
@@ -34,8 +34,28 @@ nuke CreateNugetPackages --configuration Release
 To configure the version of the built packages, add the `--force-nuget-version` parameter, e.g.:
 
 ```
-nuke CreateNugetPackages --force-nuget-version 11.4.0
+nuke CreateNugetPackages --force-nuget-version 12.1.4-lightplayer.14
 ```
+
+An explicit version is used unchanged, including in CI; no CI suffix is added.
+
+## Downloading CI Packages
+
+The [Build workflow](../.github/workflows/build.yml) publishes downloadable files instead of uploading packages to a NuGet feed.
+
+1. Open **Actions > Build > Run workflow** and select the branch to build.
+2. Set the optional **version** input, for example `12.1.4-lightplayer.14`. Leave it empty to keep automatic versioning.
+3. After the workflow succeeds, download and extract the **packages** artifact from the run's **Artifacts** section.
+
+The archive contains the Windows-built NuGet packages plus the macOS-built `Avalonia.Native` package and their symbol packages. The `native-macos`, `sbom-macos`, and `sbom-windows` artifacts remain available separately. Artifacts follow the repository's retention settings.
+
+Add the extracted package directory as a local NuGet source in the consuming environment:
+
+```bash
+dotnet nuget add source /absolute/path/to/extracted/packages --name avalonia-local
+```
+
+Then reference the generated version in the consuming project's Avalonia package references. Pull request builds also receive a comment linking to their artifacts.
 
 ## Building to the Local Cache
 
