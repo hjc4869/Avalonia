@@ -11,6 +11,11 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g. 12.1.4-lightplayer.14; leave empty for automatic versioning)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
   DOTNET_NOLOGO: 1
+  PACKAGE_VERSION: ${{ inputs.version }}
 
 jobs:
 
@@ -51,7 +57,11 @@ jobs:
         run: |
           dotnet --info
           printenv
-          ./build.sh --target CiLinux --configuration=Release
+          build_args=(--target CiLinux --configuration Release)
+          if [[ -n "$PACKAGE_VERSION" ]]; then
+            build_args+=(--force-nuget-version "$PACKAGE_VERSION")
+          fi
+          ./build.sh "${build_args[@]}"
 
   macos:
     name: macOS
@@ -71,25 +81,32 @@ jobs:
         run: |
           dotnet --info
           printenv
-          ./build.sh --target CiMacOS --configuration Release
+          build_args=(--target CiMacOS --configuration Release)
+          if [[ -n "$PACKAGE_VERSION" ]]; then
+            build_args+=(--force-nuget-version "$PACKAGE_VERSION")
+          fi
+          ./build.sh "${build_args[@]}"
 
       - name: Upload Native Library
         uses: actions/upload-artifact@v7
         with:
           name: native-macos
           path: artifacts/native/Release/
+          if-no-files-found: error
 
-      - name: Upload NuGet Packages
+      - name: Upload Package Files
         uses: actions/upload-artifact@v7
         with:
           name: nuget-macos
           path: artifacts/nuget
+          if-no-files-found: error
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v7
         with:
           name: sbom-macos
           path: artifacts/sbom
+          if-no-files-found: error
 
   windows:
     name: Windows
@@ -104,84 +121,51 @@ jobs:
         run: dotnet workload install android ios tvos maccatalyst macos wasm-tools
 
       - name: Run Build
-        run: ./build.cmd --target CiWindows --configuration Release
+        run: |
+          $buildArgs = @('--target', 'CiWindows', '--configuration', 'Release')
+          if ($env:PACKAGE_VERSION) {
+            $buildArgs += @('--force-nuget-version', $env:PACKAGE_VERSION)
+          }
+          ./build.cmd @buildArgs
 
-      - name: Upload NuGet Packages
+      - name: Upload Package Files
         uses: actions/upload-artifact@v7
         with:
           name: nuget-windows
           path: artifacts/nuget
+          if-no-files-found: error
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v7
         with:
           name: sbom-windows
           path: artifacts/sbom
+          if-no-files-found: error
 
-  # Only release/x.y.z branches (with an optional prerelease suffix) are releasable, not release/x.y ones.
-  # Expressions have no regex support, so a small job classifies the branch instead.
-  branch-info:
-    name: Branch Info
-    runs-on: ubuntu-24.04
-    outputs:
-      is-release: ${{ steps.classify.outputs.is-release }}
-    steps:
-      - name: Classify Branch
-        id: classify
-        env:
-          REF: ${{ github.ref }}
-        run: |
-          if [[ "$REF" =~ ^refs/heads/release/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            is_release=true
-          else
-            is_release=false
-          fi
-          echo "Ref: $REF, is release: $is_release"
-          echo "is-release=$is_release" >> "$GITHUB_OUTPUT"
-
-  # Note: pull requests are published by publish-nuget-pr.yml instead, which runs once this workflow completes.
-
-  publish-nightly:
-    name: Publish Nightly NuGet Packages
-    needs: [linux, windows, macos, branch-info]
-    # Everything except pull requests, merge queue runs and release/x.y.z branches (release/x.y ones are nightlies too).
-    if: >-
-      github.event_name != 'pull_request'
-      && github.event_name != 'merge_group'
-      && needs.branch-info.outputs.is-release != 'true'
-      && vars.NIGHTLY_FEED_UPLOAD_URL != ''
+  publish-packages:
+    name: Publish Package Files
+    needs: [linux, windows, macos]
     runs-on: ubuntu-24.04
 
     steps:
-      - &step-checkout-actions
-        name: Checkout Actions
-        uses: actions/checkout@v7
+      - name: Download Windows Package Files
+        uses: actions/download-artifact@v7
         with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
+          name: nuget-windows
+          path: packages
 
-      - name: Publish NuGet Packages
-        uses: ./.github/actions/publish-nuget
+      - name: Download macOS Package Files
+        uses: actions/download-artifact@v7
         with:
-          feed-url: ${{ vars.NIGHTLY_FEED_UPLOAD_URL }}
-          api-key: ${{ secrets.NIGHTLY_FEED_API_KEY }}
+          name: nuget-macos
+          path: nuget-macos
 
-  # Pushes to release/x.y.z build automatically, but publishing waits for a manual approval of the "release" environment.
-  publish-release:
-    name: Publish Release NuGet Packages
-    needs: [linux, windows, macos, branch-info]
-    if: >-
-      github.event_name != 'pull_request'
-      && github.event_name != 'merge_group'
-      && needs.branch-info.outputs.is-release == 'true'
-    runs-on: ubuntu-24.04
-    environment: release
+      - name: Assemble Package Files
+        run: cp nuget-macos/Avalonia.Native.*nupkg packages/
 
-    steps:
-      - *step-checkout-actions
-
-      - name: Publish NuGet Packages
-        uses: ./.github/actions/publish-nuget
+      - name: Upload Package Files
+        uses: actions/upload-artifact@v7
         with:
-          feed-url: ${{ vars.RELEASE_MANAGER_UPLOAD_URL }}
-          api-key: ${{ secrets.RELEASE_MANAGER_API_KEY }}
+          name: packages
+          path: packages/
+          if-no-files-found: error
