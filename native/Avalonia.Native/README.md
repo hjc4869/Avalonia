@@ -2,6 +2,18 @@
 
 This project implements the macOS native platform backend for Avalonia using Objective-C++ and COM (Component Object Model) interfaces.
 
+## Touchpad Input
+
+Scroll events with an AppKit contact or momentum phase are forwarded as touchpad wheel events.
+The managed bridge sets `PointerWheelEventArgs.IsTouchpad` and maps the contact phases to
+`Began`, `Changed`, `Ended`, and `Cancelled`. Momentum deltas use `Inertia`, including when
+the contact phase is `NSEventPhaseNone`.
+
+Zero-delta begin, end, and cancellation events are retained so consumers can track contact
+lifetimes without an idle timeout. Other zero-delta scroll events are discarded. Precision
+alone does not identify a touchpad: unphased precise scrolling retains mouse-wheel semantics.
+Precise deltas use 50 points per wheel unit; non-precise deltas use 5. Magnification, rotation,
+and discrete swipe events are forwarded independently of scrolling.
 
 ## COM Reference Management
 

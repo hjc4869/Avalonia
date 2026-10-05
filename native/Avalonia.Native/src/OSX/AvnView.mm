@@ -318,10 +318,32 @@ static void ConvertTilt(NSPoint tilt, float* xTilt, float* yTilt)
             speed = 50;
         }
 
+        if(event.phase & NSEventPhaseCancelled)
+        {
+            type = TouchpadScrollCancelled;
+        }
+        else if(event.phase & NSEventPhaseBegan)
+        {
+            type = TouchpadScrollBegan;
+        }
+        else if(event.phase & NSEventPhaseEnded)
+        {
+            type = TouchpadScrollEnded;
+        }
+        else if(event.momentumPhase != NSEventPhaseNone)
+        {
+            type = TouchpadScrollInertia;
+        }
+        else if(event.phase != NSEventPhaseNone)
+        {
+            type = TouchpadScroll;
+        }
+
         delta.X = [event scrollingDeltaX] / speed;
         delta.Y = [event scrollingDeltaY] / speed;
 
-        if(delta.X == 0 && delta.Y == 0)
+        if(delta.X == 0 && delta.Y == 0 &&
+           type != TouchpadScrollBegan && type != TouchpadScrollEnded && type != TouchpadScrollCancelled)
         {
             return;
         }
