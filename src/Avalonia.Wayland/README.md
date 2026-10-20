@@ -195,6 +195,14 @@ by `1 + Delta.Y` applies one update. Logical-center movement produces touchpad-m
 and rotation produces `PointerTouchPadGestureRotate` deltas in clockwise degrees. Ending or
 cancelling a pinch clears its target and scale state.
 
+## Client-side title bars
+
+A left-button press or touch on an element with the `TitleBar` decoration role starts an
+interactive `xdg_toplevel.move`. A second press of the same pointer type within the platform
+double-tap time and size toggles between the normal and maximized states instead, honoring
+`CanResize` and `CanMaximize`. Full-screen windows, and windows that cannot change state, keep the
+move request.
+
 ## Protocol docs
 
 Do NOT assume things about Wayland protocols. Those could be rather non-intuitive. Always check what the protocol says

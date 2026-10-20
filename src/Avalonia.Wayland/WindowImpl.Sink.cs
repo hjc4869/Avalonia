@@ -2,6 +2,7 @@ using System;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
+using Avalonia.Platform;
 using Avalonia.Wayland.Server;
 using Avalonia.Wayland.Server.Persistent;
 using NWayland.Protocols.XdgShell;
@@ -16,6 +17,10 @@ partial class WindowImpl
         private XdgConfigureBatch? _initialBatch;
         private WaylandSurfaceCreateResult<WXdgTopLevelProxy>? _handle;
         private WXdgTopLevelProxy? _surfaceProxy;
+        private bool _titleBarPressArmed;
+        private PointerType _titleBarPressPointerType;
+        private ulong _titleBarPressTime;
+        private Rect _titleBarPressArea;
 
         public Sink(WindowImpl parent, bool secondShow) : base(parent)
         {
@@ -151,9 +156,13 @@ partial class WindowImpl
             var chromeRole = InputRoot.HitTestChromeElement(mouse.Position);
             if (chromeRole == WindowDecorationsElementRole.TitleBar)
             {
-                _surfaceProxy?.Move(mouse.PlatformInputEventCookie, WaylandDispatchPriority.Oob);
+                // Client-side title bars own the double-click action that server-side decorations provide.
+                if (!IsTitleBarDoublePress(mouse) || !Parent.ToggleMaximizedFromTitleBar())
+                    _surfaceProxy?.Move(mouse.PlatformInputEventCookie, WaylandDispatchPriority.Oob);
                 return true;
             }
+
+            _titleBarPressArmed = false;
 
             if (Parent._canResize && chromeRole is { } role)
             {
@@ -178,6 +187,24 @@ partial class WindowImpl
             }
 
             return false;
+        }
+
+        private bool IsTitleBarDoublePress(RawPointerEventArgs args)
+        {
+            var pointerType = args.Type == RawPointerEventType.TouchBegin ? PointerType.Touch : PointerType.Mouse;
+            var settings = AvaloniaLocator.Current.GetService<IPlatformSettings>();
+            var time = settings?.GetDoubleTapTime(pointerType).TotalMilliseconds ?? 500;
+            var size = settings?.GetDoubleTapSize(pointerType) ?? new Size(4, 4);
+            var isDouble = _titleBarPressArmed && _titleBarPressPointerType == pointerType &&
+                _titleBarPressArea.Contains(args.Position) &&
+                args.Timestamp >= _titleBarPressTime && args.Timestamp - _titleBarPressTime <= time;
+
+            _titleBarPressArmed = !isDouble;
+            _titleBarPressPointerType = pointerType;
+            _titleBarPressTime = args.Timestamp;
+            _titleBarPressArea = new Rect(args.Position, new Size())
+                .Inflate(new Thickness(size.Width / 2, size.Height / 2));
+            return isDouble;
         }
     }
 }
