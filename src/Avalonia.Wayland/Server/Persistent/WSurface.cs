@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
 using Avalonia.Platform;
@@ -38,6 +39,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
     private WlCallback? _frameCallback;
     private bool _hitTestVisible = true;
+    private Rect? _inputRect;
     private double _currentScale = 1;
     private const double ScaleEpsilon = 1e-6;
     private readonly List<IDisposable> _activeRenderTargets = new();
@@ -165,6 +167,15 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             WlSurface.Commit();
     }
 
+    // Stage geometry changes with the buffer that defines their surface-local coordinates.
+    protected void SetInputRect(Rect? rect)
+    {
+        if (_inputRect == rect)
+            return;
+        _inputRect = rect;
+        ApplyInputRegion();
+    }
+
     /// <summary>
     /// Whether committing this surface outside of a buffer attach is legal right
     /// now. When it isn't, staged double-buffered state stays pending and is
@@ -180,16 +191,14 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     protected virtual bool CanCommitOutOfBand => true;
 
     /// <summary>
-    /// Installs the input region matching the cached hit-test state. An empty
-    /// region makes the compositor route pointer/touch input to whatever is
-    /// behind this surface.
+    /// Installs the cached input rectangle, or an empty region when hit testing is disabled.
     /// </summary>
     private void ApplyInputRegion()
     {
         if (WlSurface == null)
             return;
 
-        if (_hitTestVisible)
+        if (_hitTestVisible && _inputRect == null)
         {
             // null is the protocol default: an infinite input region.
             WlSurface.SetInputRegion(null!);
@@ -199,6 +208,12 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
         var region = Globals!.WlCompositor.CreateRegion();
         try
         {
+            if (_hitTestVisible && _inputRect is { } rect)
+            {
+                var left = (int)Math.Floor(rect.Left);
+                var top = (int)Math.Floor(rect.Top);
+                region.Add(left, top, (int)Math.Ceiling(rect.Right) - left, (int)Math.Ceiling(rect.Bottom) - top);
+            }
             WlSurface.SetInputRegion(region);
         }
         finally
@@ -750,6 +765,15 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
     public WXdgTopLevel(WaylandWorker worker, WXdgTopLevelEventSinkProxy eventSink) : base(worker, eventSink)
     {
         _topLevelEventSink = eventSink;
+    }
+
+    protected override void MaybeEmitWindowGeometry(PixelSize bufferPixelSize, double bufferScale, Size logicalSize)
+    {
+        base.MaybeEmitWindowGeometry(bufferPixelSize, bufferScale, logicalSize);
+        SetInputRect(ShadowExtents != default && LastWindowGeometry is { } geometry
+            ? new Rect(geometry.Left, geometry.Top, geometry.Width, geometry.Height)
+                .Inflate(ResizeGripLayer.MaxShadowGripThickness)
+            : null);
     }
 
     public override void OnConnected(WaylandConnection connection, WaylandGlobals globals)

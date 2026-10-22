@@ -1,5 +1,8 @@
 # Wayland platform
 
+Client-decorated windows keep their full shadows, with resizing confined to a narrow band beside
+the visible frame. Pointer and touch input in the outer shadow passes through to windows behind it.
+
 
 ## Special considerations
 
@@ -202,6 +205,19 @@ interactive `xdg_toplevel.move`. A second press of the same pointer type within 
 double-tap time and size toggles between the normal and maximized states instead, honoring
 `CanResize` and `CanMaximize`. Full-screen windows, and windows that cannot change state, keep the
 move request.
+
+### Resize grips and shadow input
+
+Drawn resize grips cover the frame plus up to 4 DIPs of the adjacent shadow on each side.
+`TopLevelHost` insets the grip layer by the remaining shadow thickness, keeping its edge and corner
+roles aligned with the visible frame.
+
+Before attaching each top-level buffer, the Wayland worker stages a `wl_surface` input region
+covering the window geometry inflated by the same 4-DIP shadow band. The compositor clips that
+region to the surface bounds. Input-region changes commit with the buffer and window geometry,
+including resizing, scaling, decoration changes, and maximized/full-screen transitions. Disabling
+hit testing still installs an empty input region; reconnecting replays the cached region. Popups
+retain their own input behavior.
 
 ## Protocol docs
 
