@@ -11,11 +11,6 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Package version (e.g. 12.1.4-lightplayer.14; leave empty for automatic versioning)'
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -28,13 +23,40 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
   DOTNET_NOLOGO: 1
-  PACKAGE_VERSION: ${{ inputs.version }}
 
 jobs:
 
+  version:
+    name: Generate Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Generate Package Version
+        id: version
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("build/SharedVersion.props").getroot()
+          version = root.find("{*}PropertyGroup/{*}Version").text
+          major, minor, patch = map(int, version.split("."))
+          package_version = f"{major}.{minor}.{patch + 1}-custom.{os.environ['GITHUB_RUN_NUMBER']}"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"version={package_version}", file=output)
+          PY
+
   linux:
     name: Linux
+    needs: version
     runs-on: ubuntu-24.04
+    env:
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - &step-checkout
@@ -57,17 +79,15 @@ jobs:
         run: |
           dotnet --info
           printenv
-          build_args=(--target CiLinux --configuration Release)
-          if [[ -n "$PACKAGE_VERSION" ]]; then
-            build_args+=(--force-nuget-version "$PACKAGE_VERSION")
-          fi
-          ./build.sh "${build_args[@]}"
+          ./build.sh --target CiLinux --configuration Release --force-nuget-version "$PACKAGE_VERSION"
 
   macos:
     name: macOS
+    needs: version
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - *step-checkout
@@ -81,11 +101,7 @@ jobs:
         run: |
           dotnet --info
           printenv
-          build_args=(--target CiMacOS --configuration Release)
-          if [[ -n "$PACKAGE_VERSION" ]]; then
-            build_args+=(--force-nuget-version "$PACKAGE_VERSION")
-          fi
-          ./build.sh "${build_args[@]}"
+          ./build.sh --target CiMacOS --configuration Release --force-nuget-version "$PACKAGE_VERSION"
 
       - name: Upload Native Library
         uses: actions/upload-artifact@v7
@@ -110,7 +126,10 @@ jobs:
 
   windows:
     name: Windows
+    needs: version
     runs-on: windows-2025
+    env:
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - *step-checkout
@@ -122,11 +141,7 @@ jobs:
 
       - name: Run Build
         run: |
-          $buildArgs = @('--target', 'CiWindows', '--configuration', 'Release')
-          if ($env:PACKAGE_VERSION) {
-            $buildArgs += @('--force-nuget-version', $env:PACKAGE_VERSION)
-          }
-          ./build.cmd @buildArgs
+          ./build.cmd --target CiWindows --configuration Release --force-nuget-version "$env:PACKAGE_VERSION"
 
       - name: Upload Package Files
         uses: actions/upload-artifact@v7
@@ -143,9 +158,14 @@ jobs:
           if-no-files-found: error
 
   publish-packages:
-    name: Publish Package Files
-    needs: [linux, windows, macos]
+    name: Publish Release
+    needs: [version, linux, windows, macos]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - name: Download Windows Package Files
@@ -163,9 +183,17 @@ jobs:
       - name: Assemble Package Files
         run: cp nuget-macos/Avalonia.Native.*nupkg packages/
 
-      - name: Upload Package Files
-        uses: actions/upload-artifact@v7
-        with:
-          name: packages
-          path: packages/
-          if-no-files-found: error
+      - name: Create NuGet Archive
+        run: zip -j "Avalonia-NuGet-$PACKAGE_VERSION.zip" packages/*nupkg
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$PACKAGE_VERSION" "Avalonia-NuGet-$PACKAGE_VERSION.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$PACKAGE_VERSION" \
+            --notes "Custom build of commit $GITHUB_SHA." \
+            --prerelease \
+            --latest=false
