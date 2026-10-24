@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.Build.NoTargets/3.7.134">
 
   <!--
-    Generates inc/avalonia-native.h from avn.idl and builds the Xcode project producing libAvalonia.Native.OSX.dylib,
+    Generates inc/avalonia-native.h from avn.idl and builds the Xcode project producing shared and static libraries,
     which Avalonia.Native.csproj then copies and packs.
 
     This lives in a project of its own rather than in Avalonia.Native.csproj because the latter is multi-targeted:
@@ -28,9 +28,11 @@
 
   <!-- Build the underlying Xcode project whenever one of its sources changed -->
   <ItemGroup Condition="'$(BuildAvaloniaNativeXcodeProject)' == 'true'">
-    <AvaloniaNativeSource Include="$(AvaloniaNativeSourceDir)/**/*.mm;$(AvaloniaNativeSourceDir)/**/*.cpp;$(AvaloniaNativeSourceDir)/**/*.h" />
+    <AvaloniaNativeSource Include="$(AvaloniaNativeSourceDir)/**/*.m;$(AvaloniaNativeSourceDir)/**/*.mm;$(AvaloniaNativeSourceDir)/**/*.cpp;$(AvaloniaNativeSourceDir)/**/*.h" />
     <AvaloniaNativeSource Include="$(AvaloniaNativeXcodeProject)/**/*"
                           Exclude="$(AvaloniaNativeXcodeProject)/build/**/*;$(AvaloniaNativeXcodeProject)/DerivedData/**/*;$(AvaloniaNativeXcodeProject)/**/xcuserdata/**/*" />
+    <_AvaloniaNativeStaticArchitecture Include="x86_64" RuntimeIdentifier="osx-x64" />
+    <_AvaloniaNativeStaticArchitecture Include="arm64" RuntimeIdentifier="osx-arm64" />
   </ItemGroup>
 
   <Target Name="_GenerateAvaloniaNativeDependencyCache"
@@ -84,10 +86,31 @@
 
   </Target>
 
+  <Target Name="CompileAvaloniaNativeStaticLibraries"
+          Condition="'$(BuildAvaloniaNativeXcodeProject)' == 'true'"
+          DependsOnTargets="CompileAvaloniaNativeXcodeProject"
+          BeforeTargets="CoreBuild"
+          Inputs="@(AvaloniaNativeSource);@(CustomAdditionalCompileAvaloniaNativeInputs)"
+          Outputs="$(AvaloniaNativeStaticDir)/%(_AvaloniaNativeStaticArchitecture.RuntimeIdentifier)/libAvaloniaNative.a;$(AvaloniaNativeStaticDir)/%(_AvaloniaNativeStaticArchitecture.RuntimeIdentifier)/macos_font_preinit.o">
+    <PropertyGroup>
+      <_AvaloniaNativeStaticBuildDir>$(AvaloniaNativeStaticDir)/%(_AvaloniaNativeStaticArchitecture.RuntimeIdentifier)</_AvaloniaNativeStaticBuildDir>
+    </PropertyGroup>
+
+    <Message Text="Building static native library for %(_AvaloniaNativeStaticArchitecture.RuntimeIdentifier)"
+             Importance="high" />
+    <MakeDir Directories="$(_AvaloniaNativeStaticBuildDir)" />
+    <Exec Command="xcodebuild -quiet -project &quot;$(AvaloniaNativeXcodeProject)&quot; -target Avalonia.Native.OSX -configuration $(Configuration) -sdk macosx -arch %(_AvaloniaNativeStaticArchitecture.Identity) CONFIGURATION_BUILD_DIR=&quot;$(_AvaloniaNativeStaticBuildDir)&quot; OBJROOT=&quot;$(_AvaloniaNativeStaticBuildDir)/obj&quot; ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO MACH_O_TYPE=staticlib EXECUTABLE_PREFIX=lib EXECUTABLE_EXTENSION=a PRODUCT_NAME=AvaloniaNative HEADER_SEARCH_PATHS=&quot;$(AvaloniaNativeSourceDir)/inc&quot; MACOSX_DEPLOYMENT_TARGET=11.0 CLANG_ENABLE_MODULES=YES GCC_GENERATE_DEBUGGING_SYMBOLS=NO GCC_WARN_INHIBIT_ALL_WARNINGS=YES"
+          StandardOutputImportance="low"
+          StandardErrorImportance="high" />
+    <Exec Command="xcrun --sdk macosx clang -arch %(_AvaloniaNativeStaticArchitecture.Identity) -mmacosx-version-min=11.0 -fobjc-arc -c &quot;$(AvaloniaNativeSourceDir)/src/OSX/macos_font_preinit.m&quot; -o &quot;$(_AvaloniaNativeStaticBuildDir)/macos_font_preinit.o&quot;" />
+    <Touch Files="$(_AvaloniaNativeStaticBuildDir)/libAvaloniaNative.a;$(_AvaloniaNativeStaticBuildDir)/macos_font_preinit.o" />
+  </Target>
+
   <Target Name="CleanAvaloniaNativeOutput"
           Condition="'$(BuildAvaloniaNativeXcodeProject)' == 'true'"
           BeforeTargets="CoreClean">
     <Delete Files="$(AvaloniaNativeDylibPath)" />
+    <RemoveDir Directories="$(AvaloniaNativeStaticDir)" />
   </Target>
 
   <Import Project="../../build/MicroCOM.props" />

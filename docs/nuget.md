@@ -39,6 +39,22 @@ nuke CreateNugetPackages --force-nuget-version 12.1.4-lightplayer.14
 
 An explicit version is used unchanged, including in CI; no CI suffix is added.
 
+## macOS NativeAOT Linking
+
+The macOS-built `Avalonia.Native` package contains both the dynamic native backend
+and static archives for `osx-x64` and `osx-arm64`, built from the same source as
+its managed bindings. No additional static-native package is required.
+
+For `PublishAot=true`, the package automatically selects the matching static
+archive, font initialization object, direct P/Invoke bindings, and macOS system
+frameworks. The dynamic backend is excluded from publish output. Other builds
+continue using the dynamic library. Static linking requires macOS 11 or later
+and the macOS native toolchain.
+
+Set `EnableStaticAvaloniaNative=false` to retain dynamic backend linking for an
+AOT application, or `EnableStaticAvalonia=false` to disable all Avalonia static
+integration. Keep all managed Avalonia package versions aligned as usual.
+
 ## Downloading CI Packages
 
 The [Build workflow](../.github/workflows/build.yml) publishes downloadable files instead of uploading packages to a NuGet feed.

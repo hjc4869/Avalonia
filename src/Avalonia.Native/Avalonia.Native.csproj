@@ -27,10 +27,21 @@
       <Pack>true</Pack>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <_AvaloniaNativeStaticRuntime Include="osx-x64;osx-arm64" PackagePath="static/%(Identity)/" />
+    <_AvaloniaNativeStaticInput Include="@(_AvaloniaNativeStaticRuntime->'$(AvaloniaNativeStaticDir)/%(Identity)/libAvaloniaNative.a');@(_AvaloniaNativeStaticRuntime->'$(AvaloniaNativeStaticDir)/%(Identity)/macos_font_preinit.o')" />
+    <None Include="@(_AvaloniaNativeStaticInput)" Pack="true" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Generates avalonia-native.h and, on macOS, libAvalonia.Native.OSX.dylib.
+    <None Include="buildTransitive/Avalonia.Native.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
+  <Target Name="ValidateAvaloniaNativeStaticPackage" BeforeTargets="_GetPackageFiles" Condition="'$(IncludeAvaloniaDylib)' == 'true'">
+    <Error Condition="!Exists('%(_AvaloniaNativeStaticInput.Identity)')" Text="Missing Avalonia.Native static linking input: %(_AvaloniaNativeStaticInput.Identity). Build both macOS architectures before packing." />
+  </Target>
+
+  <ItemGroup>
+    <!-- Generates avalonia-native.h and, on macOS, shared and static native libraries.
          TargetFramework is undefined so that this builds once, not once per inner build. -->
     <ProjectReference Include="..\..\native\Avalonia.Native\Avalonia.Native.macOS.proj"
                       ReferenceOutputAssembly="false"
