@@ -51,7 +51,6 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     public WSurface(WaylandWorker worker)
     {
         Worker = worker;
-        worker.PostOob(() => worker.RegisterPersistentObject(this));
     }
 
     /// <summary>
