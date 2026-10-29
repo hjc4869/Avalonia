@@ -106,11 +106,19 @@ its creation round trip, then sets it with the selected intent. Source nits are 
 `ReferenceWhiteNits` to the native 80-nit linear or 203-nit PQ reference. A content headroom ratio
 can be used without absolute source nits. No source value becomes a display measurement.
 
-Metadata-only updates are applied while HDR remains true. Replaced descriptions are released;
+Applications that adapt their pixels to the display also supply `IPlatformHdrOutputFeature` with an
+immutable `IPlatformHdrOutputMetadataProvider` for all visible content. The provider describes the
+post-processing output, including retained content and ordinary white, independently of the source
+headroom request. It is evaluated on the render thread with the submitted buffer's color-volume
+snapshot. The resulting description is staged immediately before the buffer swap; unchanged output
+metadata reuses the current description. Providers must not block or access mutable UI state.
+
+Metadata-only updates are applied with the next rendered buffer while HDR remains true. Replaced descriptions are released;
 intent and metadata are retained across native recreation/reconnect, and false clears metadata.
 Unsupported/unrepresentable or rejected metadata uses the prepared default description. The fixed
 Windows-scRGB description cannot carry these updates. The compositor still decides available
-headroom, independently of the request. These surface-state hints are not frame-indexed metadata.
+headroom, independently of the request. Source hints and output providers are immutable surface state
+delivered with scene updates.
 See [HDR content hints](../../docs/hdr-content-hints.md) for the Android implementation and Windows
 API limitations, and the [HDR surface API](../../docs/hdr-api-design.md) for metadata conversion limits.
 

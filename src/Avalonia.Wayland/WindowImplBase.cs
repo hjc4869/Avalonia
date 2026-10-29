@@ -25,7 +25,7 @@ namespace Avalonia.Wayland;
 /// callbacks and no-op platform methods that Wayland doesn't support
 /// (Move, SetTopmost, Activate, PointToClient/Screen, etc.).
 /// </summary>
-internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfaceColorVolumeFeature, IPlatformHdrContentFeature
+internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfaceColorVolumeFeature, IPlatformHdrContentFeature, IPlatformHdrOutputFeature
 {
     protected WaylandWorkerClient Client { get; }
     protected IInputRoot? InputRoot { get; private set; }
@@ -38,6 +38,7 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
     protected bool IsDisposed  { get; private set; }
     private bool _hasHdrContent;
     private PlatformHdrContentMetadata? _hdrContentMetadata;
+    private IPlatformHdrOutputMetadataProvider? _hdrOutputProvider;
     
     internal IReadOnlyList<object> CurrentOutputIds { get; set; } = Array.Empty<object>();
 
@@ -171,7 +172,20 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
         ApplyHdrContent(SurfaceProxy);
     }
 
-    internal void ApplyHdrContent(WXdgShellSurfaceProxy? proxy) => proxy?.SetHdrContent(_hasHdrContent, _hdrContentMetadata);
+    public void SetHdrOutput(IPlatformHdrOutputMetadataProvider? provider)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        if (IsDisposed || Equals(_hdrOutputProvider, provider))
+            return;
+        _hdrOutputProvider = provider;
+        SurfaceProxy?.SetHdrOutput(provider);
+    }
+
+    internal void ApplyHdrContent(WXdgShellSurfaceProxy? proxy)
+    {
+        proxy?.SetHdrContent(_hasHdrContent, _hdrContentMetadata);
+        proxy?.SetHdrOutput(_hdrOutputProvider);
+    }
 
     private void UpdatePreferredColorVolume(PlatformSurfaceColorVolume? colorVolume)
     {
@@ -194,6 +208,8 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfa
         if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
             return this;
         if (featureType == typeof(IPlatformHdrContentFeature))
+            return this;
+        if (featureType == typeof(IPlatformHdrOutputFeature))
             return this;
         return null;
     }

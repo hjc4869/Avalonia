@@ -151,6 +151,13 @@ content disappears or is deliberately switched to SDR. Temporarily fitting HDR i
 target while waiting must not clear the hint and prevent activation.
 
 There is one metadata-bearing method, with no boolean-only overload or compatibility shim.
+`IPlatformHdrOutputFeature.SetHdrOutput` accepts an immutable `IPlatformHdrOutputMetadataProvider`
+for applications that process source pixels before presentation. `GetOutputMetadata` receives the
+render session's color volume and describes the complete composed output range, including retained
+content and ordinary white. Evaluation must not block or access mutable UI state. Wayland applies
+the result with the rendered buffer and caches unchanged descriptions. A null provider uses source
+metadata as a fallback. Source demand and output bounds have independent lifetimes and semantics.
+
 `SetHdrContent(true, null)` declares HDR with unknown source metadata; false clears metadata even
 if an argument is supplied. Metadata-only changes take effect while the intent remains true.
 Invalid fields are normalized independently using the same finite/range rules as output reports.

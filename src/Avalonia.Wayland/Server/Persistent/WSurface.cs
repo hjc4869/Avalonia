@@ -34,6 +34,9 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     private bool _hasHdrContent;
     private PlatformHdrContentMetadata? _hdrContentMetadata;
     private WpImageDescriptionV1? _contentImageDescription;
+    private IPlatformHdrOutputMetadataProvider? _hdrOutputProvider;
+    private PlatformHdrContentMetadata? _appliedHdrMetadata;
+    private bool? _appliedHdrContent;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -132,20 +135,28 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             return;
         _hasHdrContent = hasHdrContent;
         _hdrContentMetadata = metadata;
-        if (_colorSurface == null)
-            return;
-        ApplyHdrContent();
-        if (CanCommitOutOfBand)
-            WlSurface?.Commit();
         Worker.WakeupRenderLoop();
     }
 
-    private void ApplyHdrContent()
+    public void SetHdrOutput(IPlatformHdrOutputMetadataProvider? provider)
+    {
+        _hdrOutputProvider = provider;
+        Worker.WakeupRenderLoop();
+    }
+
+    internal void ApplyHdrOutput(PlatformSurfaceColorVolume? colorVolume)
     {
         if (_colorSurface is null || Globals?.ColorManager is not { } manager)
             return;
+        var metadata = _hdrOutputProvider is { } provider
+            ? provider.GetOutputMetadata(colorVolume) : _hdrContentMetadata;
+        metadata = PlatformHdrContentMetadata.Normalize(_hasHdrContent, metadata);
+        if (_appliedHdrContent == _hasHdrContent && _appliedHdrMetadata == metadata)
+            return;
         var previous = _contentImageDescription;
-        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, _hdrContentMetadata);
+        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, metadata);
+        _appliedHdrContent = _hasHdrContent;
+        _appliedHdrMetadata = metadata;
         previous?.Destroy();
         previous?.Dispose();
     }
@@ -236,9 +247,10 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
         }
 
         _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
+        _appliedHdrContent = null;
+        _appliedHdrMetadata = null;
         if (_colorSurface is not null)
         {
-            ApplyHdrContent();
             _colorVolumeFeedback = globals.ColorManager?.TryTrackColorVolume(WlSurface, SetPreferredColorVolume);
         }
 

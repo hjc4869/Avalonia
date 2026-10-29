@@ -88,13 +88,16 @@ internal sealed class WaylandEglWsiSurface : EglGlPlatformSurfaceBase, IPlatform
             // SwapInterval(0) is set inside beforeSwap (so it runs with our
             // surface current); GTK re-asserts it every frame defensively
             // and we follow suit — some drivers reset it on resize.
+            PlatformSurfaceColorVolume? frameColorVolume = null;
             var session = BeginDraw(_eglSurface!, size, sceneInfo.Scaling,
                 beforeSwap: () =>
                 {
                     var display = Context.Display;
                     display.EglInterface.SwapInterval(display.Handle, 0);
+                    _surface.ApplyHdrOutput(frameColorVolume);
                     _surface.OnBeforeNewBufferAttached(sceneInfo);
                 });
+            frameColorVolume = session.PreferredColorVolume;
             var err = session.Context.GlInterface.GetError();
             // Workaround for driver quirk https://github.com/NVIDIA/egl-wayland2/issues/46
             // This is NVIDIA-specific, but setting buffers to GL_BACK won't hurt for other drivers too

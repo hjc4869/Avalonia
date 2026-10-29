@@ -69,4 +69,5 @@ internal interface IWSurface
     void SetHitTestVisible(bool value);
 
     void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata);
+    void SetHdrOutput(IPlatformHdrOutputMetadataProvider? provider);
 }

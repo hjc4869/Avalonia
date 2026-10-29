@@ -222,3 +222,30 @@ public interface IPlatformHdrContentFeature
     /// </summary>
     void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata);
 }
+
+/// <summary>
+/// An immutable description of all visible HDR output in a top level. Evaluation runs on the
+/// render thread against the same color-volume snapshot as the submitted buffer and must not block.
+/// </summary>
+[Unstable]
+public interface IPlatformHdrOutputMetadataProvider
+{
+    /// <summary>
+    /// Describes the composed pixels after client processing, relative to their reference white.
+    /// Return null when the output bounds are unknown. Include retained content and ordinary white.
+    /// </summary>
+    PlatformHdrContentMetadata? GetOutputMetadata(PlatformSurfaceColorVolume? colorVolume);
+}
+
+/// <summary>
+/// Supplies presentation metadata independently of the source headroom request.
+/// </summary>
+[Unstable]
+public interface IPlatformHdrOutputFeature
+{
+    /// <summary>
+    /// Sets an immutable snapshot on the UI thread, alongside the corresponding scene update.
+    /// Null restores source-metadata fallback. The provider may be evaluated on another thread.
+    /// </summary>
+    void SetHdrOutput(IPlatformHdrOutputMetadataProvider? provider);
+}

@@ -120,6 +120,12 @@ unavailable current measurement remains null rather than becoming a known one-ti
 
 ## Wayland
 
+`IPlatformHdrOutputFeature` accepts an immutable `IPlatformHdrOutputMetadataProvider` alongside the
+scene update. It describes all visible output after client processing, including retained content,
+and is evaluated with the render session's color volume immediately before buffer presentation.
+The provider must be safe to evaluate on the render thread without blocking. Source headroom
+requests remain independent. Without an output provider, source metadata supplies the description.
+
 Parametric linear/PQ descriptions can carry source mastering luminance and content light level.
 The backend rescales authored nits into the selected description's reference-white scale, keeping
 the existing extended-linear drawing input. Metadata-only changes replace the per-surface native
