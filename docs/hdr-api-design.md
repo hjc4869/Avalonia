@@ -188,8 +188,9 @@ white: 80 for parametric linear, 203 for PQ. Without source white, absolute mast
 be rescaled. Content headroom independently supplies the native content light level, and supplies
 the target peak when no rescalable mastering peak exists. An unknown mastering minimum uses the
 native description's zero-black convention, not a claimed display measurement. Native maxima are
-rounded up to integer nits and minima down to 0.0001 nits. Unsupported/unrepresentable metadata
-(including a target above the supported 10,000-nit description range), or a rejected description,
+rounded up to integer nits and minima down to 0.0001 nits. The mastering maximum includes reference
+white and MaxCLL and is capped at 10,000 nits. Version-1 MaxCLL is strictly above the mastering
+minimum and no higher than its maximum. Unsupported/unrepresentable metadata, or a rejected description,
 uses the prepared default description. No metadata means the prepared SDR/HDR descriptions for
 parametric linear and the fixed default description for PQ. Metadata-bearing updates require a
 description-creation round trip; old per-surface descriptions are released when replaced.

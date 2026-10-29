@@ -106,6 +106,10 @@ its creation round trip, then sets it with the selected intent. Source nits are 
 `ReferenceWhiteNits` to the native 80-nit linear or 203-nit PQ reference. A content headroom ratio
 can be used without absolute source nits. No source value becomes a display measurement.
 
+Version-1 descriptions keep MaxCLL strictly above the mastering minimum and at or below its maximum.
+The mastering maximum includes ordinary white and the declared content peak; native maxima are
+capped at 10,000 nits. Invalid minimum ranges use the fallback description.
+
 Applications that adapt their pixels to the display also supply `IPlatformHdrOutputFeature` with an
 immutable `IPlatformHdrOutputMetadataProvider` for all visible content. The provider describes the
 post-processing output, including retained content and ordinary white, independently of the source

@@ -298,12 +298,18 @@ internal sealed class WaylandColorManager : IDisposable
         var masteringPeak = content.MasteringLuminance?.MaximumNits / content.ReferenceWhiteNits * nativeWhite;
         var maximum = masteringPeak ?? contentPeak;
         var minimum = content.MasteringLuminance?.MinimumNits / content.ReferenceWhiteNits * nativeWhite ?? 0;
-        if (maximum is not { } peak || !double.IsFinite(peak) || peak <= 0 || peak > ExtendedLinearTargetPeakNits ||
-            !double.IsFinite(minimum) || minimum >= peak)
+        if (maximum is not { } peak || !double.IsFinite(peak) || peak <= 0 || !double.IsFinite(minimum))
             return null;
 
-        return ((uint)Math.Floor(minimum * 10_000), (uint)Math.Ceiling(peak),
-            contentPeak is > 0 and <= ExtendedLinearTargetPeakNits and var maxCll ? (uint)Math.Ceiling(maxCll) : null);
+        var maximumNits = (uint)Math.Ceiling(Math.Clamp(
+            Math.Max(peak, contentPeak is > 0 and var contentMaximum && double.IsFinite(contentMaximum)
+                ? contentMaximum : nativeWhite), nativeWhite, ExtendedLinearTargetPeakNits));
+        if (minimum >= maximumNits)
+            return null;
+        var maxCll = contentPeak is > 0 and var lightLevel && double.IsFinite(lightLevel)
+            ? (uint?)Math.Clamp(Math.Ceiling(lightLevel), Math.Max(nativeWhite, Math.Floor(minimum) + 1), maximumNits)
+            : null;
+        return ((uint)Math.Floor(minimum * 10_000), maximumNits, maxCll);
     }
 
     /// <summary>
