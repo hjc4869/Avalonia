@@ -130,7 +130,9 @@ Parametric linear/PQ descriptions can carry source mastering luminance and conte
 The backend rescales authored nits into the selected description's reference-white scale, keeping
 the existing extended-linear drawing input. Metadata-only changes replace the per-surface native
 description; a round trip establishes it before use. Unavailable/rejected metadata uses the prepared
-default description. Fixed Windows-scRGB does not support these metadata changes.
+default description. Linear and PQ have separate SDR and HDR descriptions with explicit MaxCLL;
+unknown HDR assumes a 1,000-nit source at 203-nit white, while known client headroom supplies the
+output range. Fixed Windows-scRGB does not support these metadata changes.
 
 Source intent and metadata survive recreation/reconnect and are cleared by false. They remain
 separate from nominal compositor feedback. Relative intent derives current headroom from valid

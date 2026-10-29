@@ -37,6 +37,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     private IPlatformHdrOutputMetadataProvider? _hdrOutputProvider;
     private PlatformHdrContentMetadata? _appliedHdrMetadata;
     private bool? _appliedHdrContent;
+    private PlatformSurfaceColorVolume? _appliedHdrColorVolume;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -151,12 +152,13 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
         var metadata = _hdrOutputProvider is { } provider
             ? provider.GetOutputMetadata(colorVolume) : _hdrContentMetadata;
         metadata = PlatformHdrContentMetadata.Normalize(_hasHdrContent, metadata);
-        if (_appliedHdrContent == _hasHdrContent && _appliedHdrMetadata == metadata)
+        if (_appliedHdrContent == _hasHdrContent && _appliedHdrMetadata == metadata && _appliedHdrColorVolume == colorVolume)
             return;
         var previous = _contentImageDescription;
-        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, metadata);
+        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, metadata, colorVolume);
         _appliedHdrContent = _hasHdrContent;
         _appliedHdrMetadata = metadata;
+        _appliedHdrColorVolume = colorVolume;
         previous?.Destroy();
         previous?.Dispose();
     }

@@ -68,7 +68,8 @@ Only the minimum is changed; the maximum and reference white stay at scRGB's 80 
 still means the reference white.
 
 The parametric extended-linear descriptions declare a separate BT.2020 target volume with an
-80-nit peak for SDR content and a 10,000-nit peak for HDR content without source metadata. Both descriptions preserve the
+80-nit peak for SDR content and a 395-nit peak for unknown HDR content, corresponding to a
+1,000-nit source at 203-nit reference white. Both descriptions preserve the
 surface's sRGB primaries, linear encoding, and reference white. This requires the compositor's
 `set_mastering_display_primaries` and `extended_target_volume` features; otherwise the backend uses
 the Windows-scRGB fallback when available. If neither scRGB description is supported, it tries
@@ -99,8 +100,10 @@ topLevel.PlatformImpl?.TryGetFeature<IPlatformHdrContentFeature>()?.SetHdrConten
   hasHdrContent, hasHdrContent ? new PlatformHdrContentMetadata(HeadroomRatio: 8) : null);
 ```
 
-Without source metadata, Wayland switches prepared linear SDR/HDR descriptions without recreating
-buffers; PQ uses its default description. With supported source metadata, parametric linear/PQ
+Without source metadata, Wayland switches prepared SDR/HDR descriptions without recreating buffers.
+PQ uses 203-nit SDR and 1,000-nit HDR peaks. Client mapping with known headroom uses that target's
+range. MaxCLL is supplied even when the compositor does not support mastering metadata.
+With supported source metadata, parametric linear/PQ
 creates a per-surface description carrying mastering luminance and content light level, waits for
 its creation round trip, then sets it with the selected intent. Source nits are rescaled from
 `ReferenceWhiteNits` to the native 80-nit linear or 203-nit PQ reference. A content headroom ratio

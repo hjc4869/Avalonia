@@ -25,6 +25,7 @@ internal sealed class WaylandColorManager : IDisposable
     private const uint ScRgbReferenceWhiteNits = 80;
     private const uint ExtendedLinearTargetPeakNits = 10_000;
     private const uint PqReferenceWhiteNits = 203;
+    private const uint DefaultHdrPeakNits = 1000;
 
     private readonly WaylandConnection _connection;
     private WpColorManagerV1 _manager = null!;
@@ -167,11 +168,11 @@ internal sealed class WaylandColorManager : IDisposable
             }
             else
             {
-                _imageDescription = CreateParametricDescription(colorSpace, ScRgbReferenceWhiteNits,
+                _imageDescription = CreateParametricDescription(colorSpace, GetFallbackLuminances(colorSpace, false, null).Maximum,
                     ready => _imageDescriptionReady = ready);
-                if (colorSpace == PlatformColorSpace.ScRgbLinear)
+                if (colorSpace is PlatformColorSpace.ScRgbLinear or PlatformColorSpace.Rec2020Pq)
                 {
-                    _hdrImageDescription = CreateParametricDescription(colorSpace, ExtendedLinearTargetPeakNits,
+                    _hdrImageDescription = CreateParametricDescription(colorSpace, GetFallbackLuminances(colorSpace, true, null).Maximum,
                         ready => _hdrImageDescriptionReady = ready);
                 }
             }
@@ -204,21 +205,20 @@ internal sealed class WaylandColorManager : IDisposable
         var creator = _manager.CreateParametricCreator(new ParamsCreatorListener(), _connection.Queue);
         creator.SetPrimariesNamed(ToWaylandPrimaries(colorSpace));
         creator.SetTfNamed(ToWaylandTransferFunction(colorSpace));
-        if (colorSpace == PlatformColorSpace.ScRgbLinear)
+        if (colorSpace is PlatformColorSpace.ScRgbLinear or PlatformColorSpace.Rec2020Pq)
         {
+            var linear = colorSpace == PlatformColorSpace.ScRgbLinear;
+            var white = linear ? ScRgbReferenceWhiteNits : PqReferenceWhiteNits;
             if (SupportsSetLuminances)
-                creator.SetLuminances(0, ScRgbReferenceWhiteNits, ScRgbReferenceWhiteNits);
-            creator.SetMasteringDisplayPrimaries(
-                708_000, 292_000, 170_000, 797_000,
-                131_000, 46_000, 312_700, 329_000);
-            if (contentLuminances is null)
-                creator.SetMasteringLuminance(0, targetPeakNits);
-        }
-        if (contentLuminances is { } luminances)
-        {
-            creator.SetMasteringLuminance(luminances.Minimum, luminances.Maximum);
-            if (luminances.MaxCll is { } maxCll)
-                creator.SetMaxCll(maxCll);
+                creator.SetLuminances(0, linear ? white : Math.Max(white, targetPeakNits), white);
+            if (linear)
+                creator.SetMasteringDisplayPrimaries(
+                    708_000, 292_000, 170_000, 797_000,
+                    131_000, 46_000, 312_700, 329_000);
+            var luminances = contentLuminances ?? (Minimum: 0u, Maximum: targetPeakNits, MaxCll: (uint?)targetPeakNits);
+            if (_features.Contains(WpColorManagerV1.FeatureEnum.SetMasteringDisplayPrimaries))
+                creator.SetMasteringLuminance(luminances.Minimum, luminances.Maximum);
+            creator.SetMaxCll(luminances.MaxCll ?? luminances.Maximum);
         }
         return creator.Create(new ImageDescriptionListener(ready), null);
     }
@@ -250,20 +250,22 @@ internal sealed class WaylandColorManager : IDisposable
     }
 
     public WpImageDescriptionV1? SetHdrContent(WpColorManagementSurfaceV1 surface, bool hasHdrContent,
-        PlatformHdrContentMetadata? metadata)
+        PlatformHdrContentMetadata? metadata, PlatformSurfaceColorVolume? colorVolume = null)
     {
         if (_imageDescription == null || !_imageDescriptionReady)
             return null;
-        var contentDescription = hasHdrContent ? TryCreateContentDescription(metadata) : null;
+        var fallback = GetFallbackLuminances(ActiveColorSpace, hasHdrContent, colorVolume);
+        var luminances = hasHdrContent ? GetContentLuminances(ActiveColorSpace, metadata) ?? fallback : fallback;
+        var contentDescription = luminances == GetFallbackLuminances(ActiveColorSpace, hasHdrContent, null)
+            ? null : TryCreateContentDescription(luminances);
         var description = contentDescription ?? (hasHdrContent && _hdrImageDescriptionReady ? _hdrImageDescription! : _imageDescription);
         surface.SetImageDescription(description, PreferredRenderIntent);
         return contentDescription;
     }
 
-    private WpImageDescriptionV1? TryCreateContentDescription(PlatformHdrContentMetadata? metadata)
+    private WpImageDescriptionV1? TryCreateContentDescription((uint Minimum, uint Maximum, uint? MaxCll) luminances)
     {
-        if (_usesAbsoluteScRgb || !_features.Contains(WpColorManagerV1.FeatureEnum.SetMasteringDisplayPrimaries) ||
-            GetContentLuminances(ActiveColorSpace, metadata) is not { } luminances)
+        if (_usesAbsoluteScRgb || ActiveColorSpace is not (PlatformColorSpace.ScRgbLinear or PlatformColorSpace.Rec2020Pq))
             return null;
 
         WpImageDescriptionV1? description = null;
@@ -284,6 +286,17 @@ internal sealed class WaylandColorManager : IDisposable
         description?.Destroy();
         description?.Dispose();
         return null;
+    }
+
+    internal static (uint Minimum, uint Maximum, uint? MaxCll) GetFallbackLuminances(
+        PlatformColorSpace colorSpace, bool hasHdrContent, PlatformSurfaceColorVolume? colorVolume)
+    {
+        var white = colorSpace == PlatformColorSpace.Rec2020Pq ? PqReferenceWhiteNits : ScRgbReferenceWhiteNits;
+        var headroom = !hasHdrContent ? 1
+            : colorVolume is { ToneMapping: PlatformToneMappingMode.Client, HeadroomRatio: >= 1 and var ratio } && double.IsFinite(ratio)
+                ? ratio : (double)DefaultHdrPeakNits / PqReferenceWhiteNits;
+        var peak = (uint)Math.Ceiling(Math.Clamp(headroom * white, white, ExtendedLinearTargetPeakNits));
+        return (0, peak, peak);
     }
 
     internal static (uint Minimum, uint Maximum, uint? MaxCll)? GetContentLuminances(

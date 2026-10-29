@@ -191,8 +191,10 @@ native description's zero-black convention, not a claimed display measurement. N
 rounded up to integer nits and minima down to 0.0001 nits. The mastering maximum includes reference
 white and MaxCLL and is capped at 10,000 nits. Version-1 MaxCLL is strictly above the mastering
 minimum and no higher than its maximum. Unsupported/unrepresentable metadata, or a rejected description,
-uses the prepared default description. No metadata means the prepared SDR/HDR descriptions for
-parametric linear and the fixed default description for PQ. Metadata-bearing updates require a
+uses the prepared default description. Without metadata, both linear and PQ use separate SDR/HDR
+descriptions: SDR is bounded by reference white and unknown HDR uses a 1,000-nit source at 203-nit
+white, rescaled to the native encoding. Known client headroom supplies the fallback output range.
+MaxCLL is supplied independently of optional mastering support. Metadata-bearing updates require a
 description-creation round trip; old per-surface descriptions are released when replaced.
 
 Intent and metadata are retained across native surface recreation/reconnect where supported. Native feedback,
