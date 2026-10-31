@@ -35,9 +35,8 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     private PlatformHdrContentMetadata? _hdrContentMetadata;
     private WpImageDescriptionV1? _contentImageDescription;
     private IPlatformHdrOutputMetadataProvider? _hdrOutputProvider;
-    private PlatformHdrContentMetadata? _appliedHdrMetadata;
+    private (uint Minimum, uint Maximum, uint? MaxCll)? _appliedHdrLuminances;
     private bool? _appliedHdrContent;
-    private PlatformSurfaceColorVolume? _appliedHdrColorVolume;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -152,13 +151,15 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
         var metadata = _hdrOutputProvider is { } provider
             ? provider.GetOutputMetadata(colorVolume) : _hdrContentMetadata;
         metadata = PlatformHdrContentMetadata.Normalize(_hasHdrContent, metadata);
-        if (_appliedHdrContent == _hasHdrContent && _appliedHdrMetadata == metadata && _appliedHdrColorVolume == colorVolume)
+        // Compare the resulting luminances rather than their inputs: an EDR backlight ramp changes
+        // the feedback snapshot every frame without changing how the surface should be described.
+        var luminances = manager.GetEffectiveLuminances(_hasHdrContent, metadata, colorVolume);
+        if (_appliedHdrContent == _hasHdrContent && _appliedHdrLuminances == luminances)
             return;
         var previous = _contentImageDescription;
-        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, metadata, colorVolume);
+        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, luminances);
         _appliedHdrContent = _hasHdrContent;
-        _appliedHdrMetadata = metadata;
-        _appliedHdrColorVolume = colorVolume;
+        _appliedHdrLuminances = luminances;
         previous?.Destroy();
         previous?.Dispose();
     }
@@ -250,7 +251,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
 
         _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
         _appliedHdrContent = null;
-        _appliedHdrMetadata = null;
+        _appliedHdrLuminances = null;
         if (_colorSurface is not null)
         {
             _colorVolumeFeedback = globals.ColorManager?.TryTrackColorVolume(WlSurface, SetPreferredColorVolume);

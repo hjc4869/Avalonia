@@ -249,13 +249,22 @@ internal sealed class WaylandColorManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// The luminances a surface would be described with. Equal results produce an identical
+    /// description, so a caller can skip <see cref="SetHdrContent"/> when only the feedback changed.
+    /// </summary>
+    public (uint Minimum, uint Maximum, uint? MaxCll) GetEffectiveLuminances(bool hasHdrContent,
+        PlatformHdrContentMetadata? metadata, PlatformSurfaceColorVolume? colorVolume)
+    {
+        var fallback = GetFallbackLuminances(ActiveColorSpace, hasHdrContent, colorVolume);
+        return hasHdrContent ? GetContentLuminances(ActiveColorSpace, metadata) ?? fallback : fallback;
+    }
+
     public WpImageDescriptionV1? SetHdrContent(WpColorManagementSurfaceV1 surface, bool hasHdrContent,
-        PlatformHdrContentMetadata? metadata, PlatformSurfaceColorVolume? colorVolume = null)
+        (uint Minimum, uint Maximum, uint? MaxCll) luminances)
     {
         if (_imageDescription == null || !_imageDescriptionReady)
             return null;
-        var fallback = GetFallbackLuminances(ActiveColorSpace, hasHdrContent, colorVolume);
-        var luminances = hasHdrContent ? GetContentLuminances(ActiveColorSpace, metadata) ?? fallback : fallback;
         var contentDescription = luminances == GetFallbackLuminances(ActiveColorSpace, hasHdrContent, null)
             ? null : TryCreateContentDescription(luminances);
         var description = contentDescription ?? (hasHdrContent && _hdrImageDescriptionReady ? _hdrImageDescription! : _imageDescription);
@@ -292,8 +301,11 @@ internal sealed class WaylandColorManager : IDisposable
         PlatformColorSpace colorSpace, bool hasHdrContent, PlatformSurfaceColorVolume? colorVolume)
     {
         var white = colorSpace == PlatformColorSpace.Rec2020Pq ? PqReferenceWhiteNits : ScRgbReferenceWhiteNits;
+        // The metadata-less request asks for the potential ratio, not the current one: a compositor
+        // only raises an EDR backlight for content that exceeds the current range, so requesting the
+        // current ratio would keep it down for good. The potential is also stable during the ramp.
         var headroom = !hasHdrContent ? 1
-            : colorVolume is { ToneMapping: PlatformToneMappingMode.Client, HeadroomRatio: >= 1 and var ratio } && double.IsFinite(ratio)
+            : colorVolume is { ToneMapping: PlatformToneMappingMode.Client, MaximumHeadroomRatio: >= 1 and var ratio } && double.IsFinite(ratio)
                 ? ratio : (double)DefaultHdrPeakNits / PqReferenceWhiteNits;
         var peak = (uint)Math.Ceiling(Math.Clamp(headroom * white, white, ExtendedLinearTargetPeakNits));
         return (0, peak, peak);
@@ -341,23 +353,40 @@ internal sealed class WaylandColorManager : IDisposable
         return WaylandColorVolumeFeedback.TryCreate(_connection, _manager, surface, Publish);
     }
 
+    /// <summary>
+    /// Derives the reported ratios from one preferred-description snapshot. With relative intent the
+    /// compositor clips output to its preferred encoding, so the encoding maximum (<c>luminances</c>)
+    /// bounds what is displayable right now, while <c>target_luminance</c> is the theoretical display
+    /// range. KWin scales the former by the EDR backlight headroom it has actually applied and the
+    /// latter by the headroom it could reach, which is exactly the current/potential split. Absolute
+    /// encodings such as PQ have an encoding maximum above any target, so they stay on the target.
+    /// </summary>
     internal static PlatformSurfaceColorVolume CreateColorVolume(PlatformSurfaceColorVolume? feedback,
         bool absoluteScRgb, WpColorManagerV1.RenderIntentEnum intent)
     {
         var volume = feedback.GetValueOrDefault().Normalize();
-        var headroom = intent == WpColorManagerV1.RenderIntentEnum.Relative &&
-                       volume.ReferenceWhiteNits is { } white && volume.TargetLuminance?.MaximumNits is { } peak
-            ? Math.Max(1, peak / white) : (double?)null;
+        double? current = null, potential = null;
+        if (intent == WpColorManagerV1.RenderIntentEnum.Relative && volume.ReferenceWhiteNits is { } white)
+        {
+            var targetPeak = volume.TargetLuminance?.MaximumNits;
+            var encodingPeak = volume.PrimaryLuminance?.MaximumNits;
+            potential = ToHeadroomRatio(targetPeak, white);
+            current = ToHeadroomRatio(encodingPeak is { } encoding && targetPeak is { } target
+                ? Math.Min(encoding, target) : encodingPeak ?? targetPeak, white);
+        }
         return (volume with
         {
             SurfaceNitsPerUnit = absoluteScRgb ? ScRgbReferenceWhiteNits : null,
             ReferenceWhiteScale = absoluteScRgb ? null : 1,
-            HeadroomRatio = headroom,
-            MaximumHeadroomRatio = null,
+            HeadroomRatio = current,
+            MaximumHeadroomRatio = potential,
             ToneMapping = intent == WpColorManagerV1.RenderIntentEnum.Perceptual
                 ? PlatformToneMappingMode.Platform : PlatformToneMappingMode.Client
         }).Normalize();
     }
+
+    private static double? ToHeadroomRatio(double? peakNits, double whiteNits) =>
+        peakNits is { } peak ? Math.Max(1, peak / whiteNits) : null;
 
     // Perceptual is the only intent the protocol requires every compositor to support.
     private WpColorManagerV1.RenderIntentEnum PreferredRenderIntent =>

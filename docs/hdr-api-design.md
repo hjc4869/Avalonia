@@ -88,12 +88,16 @@ For a fixed absolute mapping with matching native reports, white scale is
 target peak and native white. Relative-only platforms report ratios directly. No backend
 manufactures absolute nits from a dimensionless ratio or substitutes potential for current headroom.
 
-Wayland with relative intent derives `HeadroomRatio = max(1, TargetLuminance.MaximumNits /
-ReferenceWhiteNits)` when both inputs from the same preferred-feedback snapshot are finite and
-positive, and the ratio is finite. Neither an encoding range nor a minimum luminance is required.
-Missing/invalid inputs or an overflowing ratio leave it null. Perceptual intent does not derive
-this ratio. The feedback's nominal luminance basis is retained; this rule does not infer physical
-display white or change the input scale of fixed Windows-scRGB surfaces.
+Wayland with relative intent derives both ratios from the same preferred-feedback snapshot.
+`MaximumHeadroomRatio = max(1, TargetLuminance.MaximumNits / ReferenceWhiteNits)` is the
+compositor's theoretical display range. `HeadroomRatio = max(1, min(PrimaryLuminance.MaximumNits,
+TargetLuminance.MaximumNits) / ReferenceWhiteNits)` is additionally bounded by the preferred
+encoding's maximum, because relative intent clips output to that encoding. A missing encoding
+maximum uses the target peak and a missing target uses the encoding maximum. Inputs must be finite
+and positive and the ratio finite; otherwise the ratio is null. No minimum luminance is required.
+Perceptual intent derives neither ratio. The feedback's nominal luminance basis is retained; this
+rule does not infer physical display white or change the input scale of fixed Windows-scRGB
+surfaces.
 
 ## Rendering policy
 
@@ -193,7 +197,9 @@ white and MaxCLL and is capped at 10,000 nits. Version-1 MaxCLL is strictly abov
 minimum and no higher than its maximum. Unsupported/unrepresentable metadata, or a rejected description,
 uses the prepared default description. Without metadata, both linear and PQ use separate SDR/HDR
 descriptions: SDR is bounded by reference white and unknown HDR uses a 1,000-nit source at 203-nit
-white, rescaled to the native encoding. Known client headroom supplies the fallback output range.
+white, rescaled to the native encoding. Known potential headroom supplies the fallback output
+range: an EDR backlight only rises for content above the current range, so requesting the current
+ratio would never obtain more.
 MaxCLL is supplied independently of optional mastering support. Metadata-bearing updates require a
 description-creation round trip; old per-surface descriptions are released when replaced.
 
@@ -342,8 +348,8 @@ luminance endpoints are independent. Native capabilities are not instantaneous p
 | Android API 35 | 1 | Availability-gated `Display.HdrSdrRatio`, or null | Same as current ratio | `Client` | Ratio listener, display/configuration changes, surface lifecycle |
 | Android API 36+ | 1 | Same current ratio | Valid availability-gated `Display.HighestHdrSdrRatio`; otherwise current ratio | `Client` | Same lifecycle; maximum refreshed with current report |
 | Browser extended canvas | 1 | `2^ScreenDetailed.hdrHeadroom` for a valid permission-gated native reading, else null | Same as current ratio | `Client` | Current screen, headroom, permission and initial canvas negotiation; worker-safe snapshots |
-| Wayland reference-white-relative linear/PQ | 1 | Relative intent: `max(1, target peak / reference white)` with valid feedback; otherwise null. Perceptual: null | Same as current ratio | Relative intent: `Client`; perceptual: `Platform` | Preferred-description completion, surface lifecycle and reconnect |
-| Wayland fixed Windows-scRGB | null; no measured diffuse-white mapping | Same relative/perceptual rule as above | Same as current ratio | Relative intent: `Client`; perceptual: `Platform` | Same as above |
+| Wayland reference-white-relative linear/PQ | 1 | Relative intent: `max(1, min(encoding peak, target peak) / reference white)` with valid feedback; otherwise null. Perceptual: null | Relative intent: `max(1, target peak / reference white)`, else the current ratio. Perceptual: null | Relative intent: `Client`; perceptual: `Platform` | Preferred-description changes, including compositor brightness, dimming and EDR backlight ramps; surface lifecycle and reconnect |
+| Wayland fixed Windows-scRGB | null; no measured diffuse-white mapping | Same relative/perceptual rule as above | Same as above | Relative intent: `Client`; perceptual: `Platform` | Same as above |
 | macOS Metal extended-linear | 1 | Native current EDR ratio when the hint is true; 1 when false; null for unavailable/invalid native readings | Native potential EDR ratio, otherwise current ratio | `Client` | Screen/headroom/profile notifications, window migration/visibility, backing properties, attachment and surface recreation |
 | macOS standard/OpenGL/software | 1 | 1 | 1 | `Client` | Fixed SDR contract |
 | iOS / iPadOS / Mac Catalyst 16+ Metal extended-linear | 1 | Attached screen's current EDR ratio when the hint is true; 1 when false; null when detached or the native reading is invalid | Attached screen's potential EDR ratio, otherwise current ratio | `Client` | Main-thread display-link polling, attachment, layout, traits and application activation |
@@ -356,10 +362,17 @@ screen ratio is not proof of final canvas luminance: browser/CSS limits and disp
 can further restrict output. The experimental browser property uses log2 stops; invalid or
 overflowing readings remain unknown. Negotiating HDR does not prompt for screen permission.
 
-Wayland's protocol permits theoretical target luminance. Even when KDE supplies plausible nits,
-the generic backend labels them `Nominal`. Relative intent can use their peak-to-white ratio for
-client highlight fitting, with the same ratio as the maximum fallback; physical current/potential
-headroom remains unmeasured. Perceptual intent leaves both ratios unknown.
+Wayland's protocol permits theoretical target luminance and has no explicit current-headroom
+field. KWin's preferred description is its output blending encoding: `luminances` carries the
+encoding maximum it currently drives, which on laptop panels with EDR allowed is scaled by the
+backlight headroom actually applied, while `target_luminance` carries the display peak scaled by
+the reachable headroom. The encoding-bounded ratio is therefore current and the target ratio is
+potential. On a display with HDR enabled they coincide, and the brightness slider and idle dimming
+move the reference white rather than the peak. The EDR backlight only rises, at roughly half a
+ratio per second, while a visible surface is described with a range above the current one; the
+content hint supplies such a description. Even when KDE supplies plausible nits, the generic backend
+labels them `Nominal`; physical headroom remains unmeasured. Perceptual intent leaves both ratios
+unknown.
 ICC-only, incomplete or failed feedback does not erase a successfully established surface policy.
 Windows-scRGB's suggested nominal white is not treated as a measured diffuse-white mapping.
 

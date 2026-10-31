@@ -131,14 +131,14 @@ The backend rescales authored nits into the selected description's reference-whi
 the existing extended-linear drawing input. Metadata-only changes replace the per-surface native
 description; a round trip establishes it before use. Unavailable/rejected metadata uses the prepared
 default description. Linear and PQ have separate SDR and HDR descriptions with explicit MaxCLL;
-unknown HDR assumes a 1,000-nit source at 203-nit white, while known client headroom supplies the
-output range. Fixed Windows-scRGB does not support these metadata changes.
+unknown HDR assumes a 1,000-nit source at 203-nit white, while known potential headroom supplies
+the output range. Fixed Windows-scRGB does not support these metadata changes.
 
 Source intent and metadata survive recreation/reconnect and are cleared by false. They remain
-separate from nominal compositor feedback. Relative intent derives current headroom from valid
-preferred target peak/reference white and uses that ratio as the maximum fallback. Perceptual
-intent leaves the ratios unknown. Neither case turns source metadata into display feedback.
-These are surface-state hints, not a frame-indexed metadata API. See the
+separate from nominal compositor feedback. Relative intent derives potential headroom from the
+preferred target peak over reference white, and current headroom from the preferred encoding peak
+bounded by that target. Perceptual intent leaves the ratios unknown. Neither case turns source
+metadata into display feedback. These are surface-state hints, not a frame-indexed metadata API. See the
 [HDR surface API](hdr-api-design.md) for source-field semantics and native limits.
 
 ## Windows
