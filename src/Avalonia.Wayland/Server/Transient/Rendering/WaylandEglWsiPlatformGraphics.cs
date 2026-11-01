@@ -27,15 +27,9 @@ internal sealed class WaylandEglWsiPlatformGraphics : WaylandPlatformGraphics.IW
     public EglDisplay Display { get; }
 
     /// <summary>
-    /// The color format surfaces actually report. Starts out as whatever EGL negotiated, but is
-    /// downgraded to unmanaged if the compositor ends up rejecting the matching image description:
-    /// rendering wide gamut pixels into a surface the compositor reads as sRGB would shift every
-    /// color on screen, while rendering sRGB into a higher precision buffer is always safe.
+    /// The color format surfaces report, as negotiated with EGL.
     /// </summary>
-    public PlatformSurfaceColorFormat ColorFormat { get; private set; }
-
-    public void DowngradeToUnmanagedColorSpace() =>
-        ColorFormat = ColorFormat with { ColorSpace = PlatformColorSpace.Unmanaged };
+    public PlatformSurfaceColorFormat ColorFormat { get; }
 
     public IPlatformGraphicsContext CreateContext() => Display.CreateContext(null);
 

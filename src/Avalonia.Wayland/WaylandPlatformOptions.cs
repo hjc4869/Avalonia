@@ -81,19 +81,12 @@ public class WaylandPlatformOptions
     public bool? UseDmabufSwapchain { get; set; }
 
     /// <summary>
-    /// Opts in to rendering into a wide gamut or extended range surface. Requires the compositor to
-    /// support <c>wp_color_manager_v1</c> and the driver to expose a matching high bit depth EGL
-    /// config; when either is missing the backend silently falls back to the standard 8 bit sRGB
-    /// surface, so enabling this is always safe.
+    /// Ordered color presentation preferences. Each candidate needs <c>wp_color_manager_v1</c> support
+    /// and a matching EGL config; unsupported candidates are skipped. <see cref="WaylandColorPresentationMode.Sdr"/>
+    /// ends negotiation and is the implicit final fallback, so null or empty selects SDR. Only WSI
+    /// rendering supports advanced color.
     /// </summary>
-    public WaylandColorMode ColorMode { get; set; } = WaylandColorMode.Standard;
-
-    /// <summary>
-    /// Ordered HDR presentation preferences. A non-null list overrides <see cref="ColorMode"/>;
-    /// unsupported candidates are skipped and SDR is the final fallback. An empty list selects SDR.
-    /// Null uses <see cref="ColorMode"/>. Only WSI rendering supports these HDR paths.
-    /// </summary>
-    public IReadOnlyList<WaylandHdrPresentationMode>? HdrPresentationPreferences { get; set; }
+    public IReadOnlyList<WaylandColorPresentationMode>? ColorPresentationPreferences { get; set; }
 
     /// <summary>
     /// If this option is set to true, a GMainLoop and GSource based dispatcher implementation will be used for the
@@ -125,52 +118,36 @@ public class WaylandPlatformOptions
     }
 }
 
-/// <summary>Supported Wayland HDR transports and highlight-mapping policies.</summary>
-public enum WaylandHdrPresentationMode
-{
-    /// <summary>Standard untagged SDR output; terminates preference negotiation.</summary>
-    Sdr,
-    /// <summary>Reference-white-relative linear input with client highlight fitting.</summary>
-    LinearRelative,
-    /// <summary>Reference-white-relative linear input with compositor perceptual mapping.</summary>
-    LinearPerceptual,
-    /// <summary>Fixed 80-nit Windows-scRGB input with client highlight fitting.</summary>
-    WindowsScRgbRelative,
-    /// <summary>Fixed 80-nit Windows-scRGB input with compositor perceptual mapping.</summary>
-    WindowsScRgbPerceptual,
-    /// <summary>Linear composition converted to PQ with client highlight fitting.</summary>
-    PqRelative,
-    /// <summary>Linear composition converted to PQ with compositor perceptual mapping.</summary>
-    PqPerceptual
-}
-
 /// <summary>
-/// The color space Avalonia renders its Wayland surfaces in.
+/// Supported Wayland color presentations: SDR outputs, and HDR transports with their highlight-mapping
+/// policy. Advanced color candidates prefer an FP16 surface.
 /// </summary>
-public enum WaylandColorMode
+public enum WaylandColorPresentationMode
 {
+    /// <summary>Standard untagged 8-bit sRGB output; terminates preference negotiation.</summary>
+    Sdr,
     /// <summary>
-    /// Non color managed 8 bit sRGB. This is the default and matches Avalonia's behaviour on every
-    /// other backend.
-    /// </summary>
-    Standard,
-
-    /// <summary>
-    /// A wide gamut surface (Display P3, falling back to Rec. 2020) with a 2.2 gamma transfer
-    /// function. Existing controls keep their appearance because Skia color converts their sRGB
-    /// colors into the wider space, while custom drawing operations can emit colors outside of the
-    /// sRGB gamut.
+    /// FP16 gamma 2.2 wide gamut output with Display P3 primaries, or BT.2020 when Display P3 is
+    /// unavailable. Skipped without FP16 support. Skia converts sRGB colors into the wider space and
+    /// blending stays gamma-encoded.
     /// </summary>
     WideColorGamut,
-
+    /// <summary>Reference-white-relative FP16 linear input with client highlight fitting.</summary>
+    LinearRelative,
+    /// <summary>Reference-white-relative FP16 linear input with compositor perceptual mapping.</summary>
+    LinearPerceptual,
+    /// <summary>Fixed 80-nit FP16 Windows-scRGB input with client highlight fitting.</summary>
+    WindowsScRgbRelative,
+    /// <summary>Fixed 80-nit FP16 Windows-scRGB input with compositor perceptual mapping.</summary>
+    WindowsScRgbPerceptual,
     /// <summary>
-    /// A 16 bit float scRGB surface: sRGB primaries with an extended linear transfer function, so
-    /// channel values below 0 and above 1 are meaningful. This is the HDR-capable mode. Note that
-    /// blending and gradient interpolation happen in linear light, which visibly differs from
-    /// Avalonia's historical sRGB-encoded blending.
-    /// When the compositor cannot accept scRGB, uses a bounded Rec. 2020 PQ surface if supported,
-    /// preferring 10 bit over 16 bit float. Skia composes in FP16 scRGB and converts to PQ on
-    /// presentation. Custom rendering must use the color format reported by its drawing lease.
+    /// Linear composition converted to PQ with client highlight fitting. Uses an FP16 surface, or
+    /// 10-bit when FP16 is unavailable.
     /// </summary>
-    ExtendedLinear
+    PqRelative,
+    /// <summary>
+    /// Linear composition converted to PQ with compositor perceptual mapping. Uses an FP16 surface,
+    /// or 10-bit when FP16 is unavailable.
+    /// </summary>
+    PqPerceptual
 }

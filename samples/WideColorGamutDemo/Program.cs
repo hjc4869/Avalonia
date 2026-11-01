@@ -27,15 +27,25 @@ internal static class Program
     internal static int Checks;
     internal static int Failures;
 
+    private static readonly WaylandColorPresentationMode[] ExtendedLinearPreferences =
+    [
+        WaylandColorPresentationMode.LinearRelative,
+        WaylandColorPresentationMode.LinearPerceptual,
+        WaylandColorPresentationMode.WindowsScRgbRelative,
+        WaylandColorPresentationMode.WindowsScRgbPerceptual,
+        WaylandColorPresentationMode.PqRelative,
+        WaylandColorPresentationMode.PqPerceptual
+    ];
+
     public static void Main(string[] args)
     {
         var extended = args.Any(arg => arg.Equals("extendedlinear", StringComparison.OrdinalIgnoreCase));
         SelfTest = args.Contains("--self-test");
         var preference = args.FirstOrDefault(arg => arg.StartsWith("--hdr=", StringComparison.Ordinal));
-        WaylandHdrPresentationMode[]? preferences = preference is null ? null : preference[6..].Split(',')
+        WaylandColorPresentationMode[]? preferences = preference is null ? null : preference[6..].Split(',')
             .Where(value => value.Length > 0)
-            .Select(value => Enum.TryParse<WaylandHdrPresentationMode>(value, true, out var mode) && Enum.IsDefined(mode)
-                ? mode : throw new ArgumentException($"Unknown HDR presentation: {value}"))
+            .Select(value => Enum.TryParse<WaylandColorPresentationMode>(value, true, out var mode) && Enum.IsDefined(mode)
+                ? mode : throw new ArgumentException($"Unknown color presentation: {value}"))
             .ToArray();
         RequestedMode = preferences is not null ? string.Join(", ", preferences)
             : extended ? "ExtendedLinear" : "Standard";
@@ -77,8 +87,7 @@ internal static class Program
             AvaloniaLocator.CurrentMutable.Bind<WaylandPlatformOptions>()
                 .ToConstant(new WaylandPlatformOptions
                 {
-                    ColorMode = extended ? WaylandColorMode.ExtendedLinear : WaylandColorMode.Standard,
-                    HdrPresentationPreferences = preferences,
+                    ColorPresentationPreferences = preferences ?? (extended ? ExtendedLinearPreferences : null),
                     UseDmabufSwapchain = args.Contains("--dmabuf")
                 });
             builder = builder.UseWayland();

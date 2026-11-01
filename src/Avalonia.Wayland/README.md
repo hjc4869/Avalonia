@@ -23,39 +23,44 @@ NOTE: crash recovery is not yet supported when using an externally created wl_di
 
 ## Color management (wide color gamut / HDR)
 
-Off by default. `WaylandPlatformOptions.ColorMode` opts in:
+Off by default. `WaylandPlatformOptions.ColorPresentationPreferences` opts in with an ordered list of
+complete candidates:
 
-- `WideColorGamut` — 10 bit (fp16 fallback) surface, Display P3 primaries with a gamma 2.2 transfer
-  function. Existing controls keep their appearance because Skia color converts their sRGB colors
-  into the wider space; blending stays gamma-encoded so gradients and antialiasing are unaffected.
-- `ExtendedLinear` — fp16 scRGB surface (sRGB primaries, extended linear transfer). Channel values
-  below 0 and above 1 are meaningful, so it's the HDR-capable mode, but blending happens in linear
-  light and therefore differs from Avalonia's historical sRGB-encoded blending. Falls back to
-  BT.2020 PQ when the compositor supports PQ but cannot accept scRGB.
+- `WideColorGamut` — FP16 surface with Display P3 primaries (BT.2020 when Display P3 is unavailable)
+  and a gamma 2.2 transfer function. Existing controls keep their appearance because Skia color
+  converts their sRGB colors into the wider space; blending stays gamma-encoded so gradients and
+  antialiasing are unaffected. Skipped without FP16, since 8-bit wide gamut bands sRGB content.
+- `LinearRelative`, `LinearPerceptual`, `WindowsScRgbRelative`, `WindowsScRgbPerceptual` — fp16
+  scRGB surfaces (sRGB primaries, extended linear transfer). Channel values below 0 and above 1 are
+  meaningful, so these are the HDR-capable modes, but blending happens in linear light and therefore
+  differs from Avalonia's historical sRGB-encoded blending.
+- `PqRelative`, `PqPerceptual` — BT.2020 PQ surfaces for compositors that cannot accept scRGB.
+- `Sdr` — untagged 8-bit sRGB; terminates negotiation.
 
-`HdrPresentationPreferences` overrides color selection with an ordered list of complete HDR
-candidates: `LinearRelative`, `LinearPerceptual`, `WindowsScRgbRelative`,
-`WindowsScRgbPerceptual`, `PqRelative`, `PqPerceptual`, and `Sdr`. Relative intent means client
-highlight fitting; perceptual intent delegates adaptation to the compositor. Empty means SDR;
-null uses `ColorMode`. The default HDR order is the order above. `Sdr` terminates negotiation.
-Only the WSI rendering path supports HDR; dmabuf and software paths remain SDR.
+Relative intent means client highlight fitting; perceptual intent delegates adaptation to the
+compositor. `WideColorGamut` uses relative intent when the compositor supports it and perceptual
+otherwise. Null or empty selects SDR, which is also the implicit final fallback. Only the WSI
+rendering path supports advanced color; dmabuf and software paths remain SDR.
+
+Every advanced color candidate asks for FP16 first. 10-bit configs only carry two alpha bits, which
+erases client-drawn window shadows and antialiased edges, so only PQ falls back to 10-bit when FP16
+is unavailable.
 
 Both sides have to agree, and negotiation runs in `WaylandGlobals` on connection setup/reconnect:
 
 1. Bind `wp_color_manager_v1` and read the compositor's supported features / transfer functions /
   primaries and render intents.
-2. Only then create the EGL display, passing high bit depth `EglColorBufferFormat` candidates with
-   the plain 8 bit config last as a fallback.
+2. For each candidate, check the compositor's support, then create the EGL display with the
+   candidate's `EglColorBufferFormat` list, with the plain 8 bit config last.
 3. Create the image descriptions for whatever EGL actually handed us, and tag each `wl_surface`
     with its content range via `wp_color_management_surface_v1.set_image_description`.
-  4. For HDR, skip unsupported candidates and retry the next preference after an EGL or description
+4. Skip unsupported candidates and retry the next preference after an EGL format or description
     failure. Log the actual selected candidate; SDR is the final fallback.
 
 **Invariant: what we render and what we tag the surface with must always match.** An untagged
-surface is interpreted as sRGB, so rendering P3 pixels into one shifts every color on screen. If
-the compositor refuses the image description, `WaylandEglWsiPlatformGraphics.DowngradeToUnmanagedColorSpace`
-puts Skia back to plain sRGB; the buffer keeps whatever extra precision EGL gave us, which is
-always safe. HDR negotiation failures advance through the list and ultimately select SDR.
+surface is interpreted as sRGB, so rendering P3 pixels into one shifts every color on screen. A
+candidate is only selected once EGL returned its color space and the compositor accepted its image
+description; otherwise negotiation moves on and ultimately selects untagged SDR.
 
 Known limitation: the software `WaylandFramebuffer` fallback always renders 8 bit sRGB, so if a
 tagged surface ever falls back to it, colors will be off until the surface is re-tagged.
@@ -71,9 +76,9 @@ The parametric extended-linear descriptions declare a separate BT.2020 target vo
 80-nit peak for SDR content and a 395-nit peak for unknown HDR content, corresponding to a
 1,000-nit source at 203-nit reference white. Both descriptions preserve the
 surface's sRGB primaries, linear encoding, and reference white. This requires the compositor's
-`set_mastering_display_primaries` and `extended_target_volume` features; otherwise the backend uses
-the Windows-scRGB fallback when available. If neither scRGB description is supported, it tries
-BT.2020 primaries with the PQ transfer function, using a 10-bit buffer with fp16 as a fallback.
+`set_mastering_display_primaries` and `extended_target_volume` features; otherwise the linear
+candidates are skipped. PQ candidates use BT.2020 primaries with the PQ transfer function, using an
+fp16 buffer with 10-bit as a fallback.
 PQ uses the protocol's 203-nit reference white and 10,000-nit encoding maximum. Skia maps ordinary
 SDR white to the reference white, preserving the remaining range for HDR highlights.
 

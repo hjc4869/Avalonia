@@ -41,17 +41,6 @@ internal sealed class WaylandColorManager : IDisposable
     private bool _usesAbsoluteScRgb;
     private WpColorManagerV1.RenderIntentEnum? _selectedRenderIntent;
 
-    internal static readonly IReadOnlyList<WaylandHdrPresentationMode> DefaultHdrPreferences =
-    [
-        WaylandHdrPresentationMode.LinearRelative,
-        WaylandHdrPresentationMode.LinearPerceptual,
-        WaylandHdrPresentationMode.WindowsScRgbRelative,
-        WaylandHdrPresentationMode.WindowsScRgbPerceptual,
-        WaylandHdrPresentationMode.PqRelative,
-        WaylandHdrPresentationMode.PqPerceptual,
-        WaylandHdrPresentationMode.Sdr
-    ];
-
     private WaylandColorManager(WaylandConnection connection)
     {
         _connection = connection;
@@ -87,48 +76,46 @@ internal sealed class WaylandColorManager : IDisposable
         }
     }
 
-    /// <summary>
-    /// Picks the best color space the compositor can accept for the requested mode, or
-    /// <see cref="PlatformColorSpace.Unmanaged"/> when the mode can't be satisfied.
-    /// </summary>
-    public PlatformColorSpace SelectColorSpace(WaylandColorMode mode)
+    private PlatformColorSpace SelectWideColorGamut()
     {
-        switch (mode)
-        {
-            case WaylandColorMode.WideColorGamut:
-                if (!_features.Contains(WpColorManagerV1.FeatureEnum.Parametric))
-                    return PlatformColorSpace.Unmanaged;
-                // Gamma 2.2 keeps blending close to Avalonia's historical sRGB-encoded behaviour,
-                // unlike a linear-light target which visibly changes gradients and antialiasing.
-                if (!_transferFunctions.Contains(WpColorManagerV1.TransferFunctionEnum.Gamma22))
-                    return PlatformColorSpace.Unmanaged;
-                if (_primaries.Contains(WpColorManagerV1.PrimariesEnum.DisplayP3))
-                    return PlatformColorSpace.DisplayP3;
-                if (_primaries.Contains(WpColorManagerV1.PrimariesEnum.Bt2020))
-                    return PlatformColorSpace.Rec2020;
-                return PlatformColorSpace.Unmanaged;
-
-            default:
-                return PlatformColorSpace.Unmanaged;
-        }
+        if (!_features.Contains(WpColorManagerV1.FeatureEnum.Parametric))
+            return PlatformColorSpace.Unmanaged;
+        // Gamma 2.2 keeps blending close to Avalonia's historical sRGB-encoded behaviour,
+        // unlike a linear-light target which visibly changes gradients and antialiasing.
+        if (!_transferFunctions.Contains(WpColorManagerV1.TransferFunctionEnum.Gamma22))
+            return PlatformColorSpace.Unmanaged;
+        if (_primaries.Contains(WpColorManagerV1.PrimariesEnum.DisplayP3))
+            return PlatformColorSpace.DisplayP3;
+        if (_primaries.Contains(WpColorManagerV1.PrimariesEnum.Bt2020))
+            return PlatformColorSpace.Rec2020;
+        return PlatformColorSpace.Unmanaged;
     }
 
     internal static (PlatformColorSpace ColorSpace, bool AbsoluteScRgb, WpColorManagerV1.RenderIntentEnum Intent)?
-        DescribePresentation(WaylandHdrPresentationMode mode) => mode switch
+        DescribePresentation(WaylandColorPresentationMode mode) => mode switch
         {
-            WaylandHdrPresentationMode.LinearRelative => (PlatformColorSpace.ScRgbLinear, false, WpColorManagerV1.RenderIntentEnum.Relative),
-            WaylandHdrPresentationMode.LinearPerceptual => (PlatformColorSpace.ScRgbLinear, false, WpColorManagerV1.RenderIntentEnum.Perceptual),
-            WaylandHdrPresentationMode.WindowsScRgbRelative => (PlatformColorSpace.ScRgbLinear, true, WpColorManagerV1.RenderIntentEnum.Relative),
-            WaylandHdrPresentationMode.WindowsScRgbPerceptual => (PlatformColorSpace.ScRgbLinear, true, WpColorManagerV1.RenderIntentEnum.Perceptual),
-            WaylandHdrPresentationMode.PqRelative => (PlatformColorSpace.Rec2020Pq, false, WpColorManagerV1.RenderIntentEnum.Relative),
-            WaylandHdrPresentationMode.PqPerceptual => (PlatformColorSpace.Rec2020Pq, false, WpColorManagerV1.RenderIntentEnum.Perceptual),
+            WaylandColorPresentationMode.LinearRelative => (PlatformColorSpace.ScRgbLinear, false, WpColorManagerV1.RenderIntentEnum.Relative),
+            WaylandColorPresentationMode.LinearPerceptual => (PlatformColorSpace.ScRgbLinear, false, WpColorManagerV1.RenderIntentEnum.Perceptual),
+            WaylandColorPresentationMode.WindowsScRgbRelative => (PlatformColorSpace.ScRgbLinear, true, WpColorManagerV1.RenderIntentEnum.Relative),
+            WaylandColorPresentationMode.WindowsScRgbPerceptual => (PlatformColorSpace.ScRgbLinear, true, WpColorManagerV1.RenderIntentEnum.Perceptual),
+            WaylandColorPresentationMode.PqRelative => (PlatformColorSpace.Rec2020Pq, false, WpColorManagerV1.RenderIntentEnum.Relative),
+            WaylandColorPresentationMode.PqPerceptual => (PlatformColorSpace.Rec2020Pq, false, WpColorManagerV1.RenderIntentEnum.Perceptual),
             _ => null
         };
 
-    public bool TrySelectHdrPresentation(WaylandHdrPresentationMode mode, out PlatformColorSpace colorSpace)
+    /// <summary>
+    /// Selects the color space for <paramref name="mode"/> when the compositor supports it. Wide color
+    /// gamut keeps the default render intent; HDR candidates fix their own.
+    /// </summary>
+    public bool TrySelectPresentation(WaylandColorPresentationMode mode, out PlatformColorSpace colorSpace)
     {
         DestroyImageDescription();
         colorSpace = PlatformColorSpace.Unmanaged;
+        if (mode == WaylandColorPresentationMode.WideColorGamut)
+        {
+            colorSpace = SelectWideColorGamut();
+            return colorSpace != PlatformColorSpace.Unmanaged;
+        }
         if (DescribePresentation(mode) is not { } candidate || !_renderIntents.Contains(candidate.Intent))
             return false;
         var supported = candidate.AbsoluteScRgb

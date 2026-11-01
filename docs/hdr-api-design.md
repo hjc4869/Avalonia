@@ -288,17 +288,17 @@ color-volume/content-hint features. Inspect the session's actual format, not jus
 
 ## Wayland presentation preferences
 
-`WaylandPlatformOptions.HdrPresentationPreferences` is an optional ordered list. It selects
+`WaylandPlatformOptions.ColorPresentationPreferences` is an optional ordered list. It selects
 complete supported transport/intent combinations, not independent settings that could conflict.
 
 ```csharp
 var options = new WaylandPlatformOptions
 {
-    HdrPresentationPreferences = new[]
+    ColorPresentationPreferences = new[]
     {
-        WaylandHdrPresentationMode.LinearPerceptual,
-        WaylandHdrPresentationMode.PqPerceptual,
-        WaylandHdrPresentationMode.Sdr
+        WaylandColorPresentationMode.LinearRelative,
+        WaylandColorPresentationMode.WideColorGamut,
+        WaylandColorPresentationMode.Sdr
     }
 };
 ```
@@ -307,17 +307,18 @@ var options = new WaylandPlatformOptions
 | --- | --- | --- |
 | `LinearRelative` | Parametric FP16 extended linear | Client |
 | `LinearPerceptual` | Parametric FP16 extended linear | Platform |
-| `WindowsScRgbRelative` | Fixed 80-nit Windows-scRGB | Client |
-| `WindowsScRgbPerceptual` | Fixed 80-nit Windows-scRGB | Platform |
-| `PqRelative` | PQ, 10-bit preferred with FP16 fallback; linear drawing layer | Client |
-| `PqPerceptual` | PQ, 10-bit preferred with FP16 fallback; linear drawing layer | Platform |
-| `Sdr` | Untagged standard output | No HDR contract; stops negotiation |
+| `WindowsScRgbRelative` | Fixed 80-nit FP16 Windows-scRGB | Client |
+| `WindowsScRgbPerceptual` | Fixed 80-nit FP16 Windows-scRGB | Platform |
+| `PqRelative` | PQ, FP16 preferred with 10-bit fallback; linear drawing layer | Client |
+| `PqPerceptual` | PQ, FP16 preferred with 10-bit fallback; linear drawing layer | Platform |
+| `WideColorGamut` | FP16 gamma 2.2 Display P3, or BT.2020 without Display P3 | No HDR contract; relative intent when supported |
+| `Sdr` | Untagged standard 8-bit output | No HDR contract; stops negotiation |
 
-A non-null list overrides `ColorMode` for color selection. Empty means SDR. Null uses `ColorMode`;
-`ExtendedLinear` tries linear relative/perceptual, Windows-scRGB relative/perceptual, then PQ
-relative/perceptual, in that order. Unsupported features/intents, unavailable EGL formats and
-rejected image descriptions advance to the next candidate. SDR is an implicit final fallback.
-The selected mode and fallback reasons are logged under `Wayland`.
+Null or empty means SDR. Unsupported features/intents, unavailable EGL formats and rejected image
+descriptions advance to the next candidate. SDR is an implicit final fallback. FP16 is preferred
+because 10-bit configs carry two alpha bits, which erase client-drawn shadows and antialiased
+edges; `WideColorGamut` has no lower-precision fallback. The selected mode and fallback reasons are
+logged under `Wayland`.
 
 These are startup preferences, retried when the connection is recreated, not guaranteed modes or
 display-setting overrides. HDR is implemented for the WSI rendering path; the dmabuf rendering
@@ -424,7 +425,8 @@ dotnet run --project samples/WideColorGamutDemo -- extendedlinear --renderer=Sof
 
 `--renderer=` is a macOS-only test override. `--hdr=` remains a Wayland preference list.
 
-`--hdr=` selects an empty list; `extendedlinear` selects the default HDR order. `--dmabuf` exercises
+`--hdr=` selects an empty list; `extendedlinear` selects linear relative/perceptual, Windows-scRGB
+relative/perceptual, then PQ relative/perceptual. `--dmabuf` exercises
 the SDR dmabuf path. `--self-test` changes controls through seven timed steps, verifies reference
 and peak values in the drawing surface, and closes with a nonzero exit code on a failed or missing
 set of checks. Negative wide-gamut values are included in the diagnostic readback.
@@ -432,7 +434,7 @@ set of checks. Negative wide-gamut values are included in the diagnostic readbac
 Live validation on KDE/KWin 6.7.4, Mesa 26.1.6, AMD Radeon 8060S, with HDR already enabled:
 
 - All six transport/intent candidates negotiated and passed the hint-transition pixel checks.
-- PQ selected `Rgba1010102/Rec2020Pq` natively while drawing remained `RgbaF16/ScRgbLinear`.
+- PQ presented BT.2020 PQ natively while drawing remained `RgbaF16/ScRgbLinear`.
 - Protocol traces confirmed relative/perceptual intents, metadata-only description updates for
   linear/PQ, and clearing back to the prepared descriptions. The 8x/12x source peaks generated
   640/960-nit linear and 1624/2436-nit PQ mastering/light-level metadata. Windows-scRGB stayed fixed.
@@ -440,6 +442,15 @@ Live validation on KDE/KWin 6.7.4, Mesa 26.1.6, AMD Radeon 8060S, with HDR alrea
   dmabuf SDR path passed. No global display settings were changed.
 - Full Skia and Wayland unit suites passed. Android and browser/sample builds passed. Windows
   conversion assertions passed on Linux outside the Win32-only UI integration-test harness.
+
+Nested KWin 6.7.4 and headless GNOME Shell 48.7 and 50.5, with a Mesa 26.1.6 client on AMD Radeon
+8060S and SDR outputs:
+
+- KWin selected `LinearRelative`. GNOME, which offers only perceptual intent, selected
+  `WideColorGamut` with Display P3 on 50.5 and BT.2020 on 48.7, or `PqPerceptual` when it preceded
+  `WideColorGamut`. All used FP16 buffers, and client-drawn window shadows matched SDR output.
+- llvmpipe, which exposes no FP16 Wayland config, skipped `LinearRelative` and `WideColorGamut` for
+  SDR and presented `PqPerceptual` on a 10-bit buffer.
 
 This validates negotiation, reporting, input pixels and protocol behavior, not calibrated emitted
 luminance or perceptual mapper quality. SDR screenshots cannot prove HDR brightness. Physical
