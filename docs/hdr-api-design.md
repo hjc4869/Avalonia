@@ -128,7 +128,9 @@ Application flow:
 The Skia backend uses `ReferenceWhiteScale` for ordinary color conversion into extended-linear
 surfaces on every platform. Its conservative drawing fallback for unknown scale is 1; this does
 not convert an unknown mapping into a measured white. Custom draws must avoid applying this scale
-twice when Skia color conversion already applies it.
+twice when Skia color conversion already applies it. Text on wide gamut surfaces uses grayscale
+antialiasing, because their channels are converted before display and no longer match the panel's
+subpixels.
 
 Decode source material using its source transfer function, not the output's `Transfer`.
 For relative presentation, an absolute source can be normalized by its own declared content white

@@ -639,8 +639,9 @@ namespace Avalonia.Skia
                 }
 #pragma warning restore CS0618
 
-                // If subpixel rendering is disabled globally, map subpixel modes to grayscale.
-                if (_disableSubpixelTextRendering || _colorFormat.IsExtendedRange)
+                // If subpixel rendering is disabled globally, map subpixel modes to grayscale. Wide gamut
+                // channels are converted before display, so they never line up with the panel's subpixels.
+                if (_disableSubpixelTextRendering || _colorFormat.IsWideGamut)
                 {
                     var mode = effectiveTextOptions.TextRenderingMode;
 
