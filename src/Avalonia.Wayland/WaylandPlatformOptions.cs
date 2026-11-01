@@ -127,7 +127,7 @@ public enum WaylandColorPresentationMode
     /// <summary>Standard untagged 8-bit sRGB output; terminates preference negotiation.</summary>
     Sdr,
     /// <summary>
-    /// FP16 gamma 2.2 wide gamut output with Display P3 primaries, or BT.2020 when Display P3 is
+    /// FP16 gamma 2.2 wide gamut output with BT.2020 primaries, or Display P3 when BT.2020 is
     /// unavailable. Skipped without FP16 support. Skia converts sRGB colors into the wider space and
     /// blending stays gamma-encoded.
     /// </summary>

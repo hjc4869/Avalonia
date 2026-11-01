@@ -84,10 +84,11 @@ internal sealed class WaylandColorManager : IDisposable
         // unlike a linear-light target which visibly changes gradients and antialiasing.
         if (!_transferFunctions.Contains(WpColorManagerV1.TransferFunctionEnum.Gamma22))
             return PlatformColorSpace.Unmanaged;
-        if (_primaries.Contains(WpColorManagerV1.PrimariesEnum.DisplayP3))
-            return PlatformColorSpace.DisplayP3;
+        // BT.2020 contains Display P3, and the FP16 surface keeps sRGB content precise in either.
         if (_primaries.Contains(WpColorManagerV1.PrimariesEnum.Bt2020))
             return PlatformColorSpace.Rec2020;
+        if (_primaries.Contains(WpColorManagerV1.PrimariesEnum.DisplayP3))
+            return PlatformColorSpace.DisplayP3;
         return PlatformColorSpace.Unmanaged;
     }
 

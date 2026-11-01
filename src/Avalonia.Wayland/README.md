@@ -26,7 +26,7 @@ NOTE: crash recovery is not yet supported when using an externally created wl_di
 Off by default. `WaylandPlatformOptions.ColorPresentationPreferences` opts in with an ordered list of
 complete candidates:
 
-- `WideColorGamut` — FP16 surface with Display P3 primaries (BT.2020 when Display P3 is unavailable)
+- `WideColorGamut` — FP16 surface with BT.2020 primaries (Display P3 when BT.2020 is unavailable)
   and a gamma 2.2 transfer function. Existing controls keep their appearance because Skia color
   converts their sRGB colors into the wider space; blending stays gamma-encoded so gradients and
   antialiasing are unaffected. Skipped without FP16, since 8-bit wide gamut bands sRGB content.

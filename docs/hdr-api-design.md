@@ -311,7 +311,7 @@ var options = new WaylandPlatformOptions
 | `WindowsScRgbPerceptual` | Fixed 80-nit FP16 Windows-scRGB | Platform |
 | `PqRelative` | PQ, FP16 preferred with 10-bit fallback; linear drawing layer | Client |
 | `PqPerceptual` | PQ, FP16 preferred with 10-bit fallback; linear drawing layer | Platform |
-| `WideColorGamut` | FP16 gamma 2.2 Display P3, or BT.2020 without Display P3 | No HDR contract; relative intent when supported |
+| `WideColorGamut` | FP16 gamma 2.2 BT.2020, or Display P3 without BT.2020 | No HDR contract; relative intent when supported |
 | `Sdr` | Untagged standard 8-bit output | No HDR contract; stops negotiation |
 
 Null or empty means SDR. Unsupported features/intents, unavailable EGL formats and rejected image
@@ -447,7 +447,7 @@ Nested KWin 6.7.4 and headless GNOME Shell 48.7 and 50.5, with a Mesa 26.1.6 cli
 8060S and SDR outputs:
 
 - KWin selected `LinearRelative`. GNOME, which offers only perceptual intent, selected
-  `WideColorGamut` with Display P3 on 50.5 and BT.2020 on 48.7, or `PqPerceptual` when it preceded
+  `WideColorGamut` with BT.2020 on 50.5 and 48.7, or `PqPerceptual` when it preceded
   `WideColorGamut`. All used FP16 buffers, and client-drawn window shadows matched SDR output.
 - llvmpipe, which exposes no FP16 Wayland config, skipped `LinearRelative` and `WideColorGamut` for
   SDR and presented `PqPerceptual` on a 10-bit buffer.
