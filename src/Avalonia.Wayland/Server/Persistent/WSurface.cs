@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
 using Avalonia.Platform;
@@ -11,6 +12,8 @@ using Avalonia.Wayland.Server.Transient;
 using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
+using NWayland.Protocols.Plasma.Appmenu;
+using NWayland.Protocols.Plasma.ServerDecorationPalette;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
 using NWayland.Protocols.XdgDecorationUnstableV1;
@@ -39,6 +42,7 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
     private WlCallback? _frameCallback;
     private bool _hitTestVisible = true;
+    private Rect? _inputRect;
     private double _currentScale = 1;
     private const double ScaleEpsilon = 1e-6;
     private readonly List<IDisposable> _activeRenderTargets = new();
@@ -176,6 +180,15 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             WlSurface.Commit();
     }
 
+    // Stage geometry changes with the buffer that defines their surface-local coordinates.
+    protected void SetInputRect(Rect? rect)
+    {
+        if (_inputRect == rect)
+            return;
+        _inputRect = rect;
+        ApplyInputRegion();
+    }
+
     /// <summary>
     /// Whether committing this surface outside of a buffer attach is legal right
     /// now. When it isn't, staged double-buffered state stays pending and is
@@ -191,16 +204,14 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     protected virtual bool CanCommitOutOfBand => true;
 
     /// <summary>
-    /// Installs the input region matching the cached hit-test state. An empty
-    /// region makes the compositor route pointer/touch input to whatever is
-    /// behind this surface.
+    /// Installs the cached input rectangle, or an empty region when hit testing is disabled.
     /// </summary>
     private void ApplyInputRegion()
     {
         if (WlSurface == null)
             return;
 
-        if (_hitTestVisible)
+        if (_hitTestVisible && _inputRect == null)
         {
             // null is the protocol default: an infinite input region.
             WlSurface.SetInputRegion(null!);
@@ -210,6 +221,12 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
         var region = Globals!.WlCompositor.CreateRegion();
         try
         {
+            if (_hitTestVisible && _inputRect is { } rect)
+            {
+                var left = (int)Math.Floor(rect.Left);
+                var top = (int)Math.Floor(rect.Top);
+                region.Add(left, top, (int)Math.Ceiling(rect.Right) - left, (int)Math.Ceiling(rect.Bottom) - top);
+            }
             WlSurface.SetInputRegion(region);
         }
         finally
@@ -296,6 +313,20 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     }
 
     public bool IsFrameCallbackPending => _frameCallback != null;
+
+    public bool EnsureFrameCallback()
+    {
+        if (WlSurface == null || !CanCommitOutOfBand)
+            return false;
+
+        if (_frameCallback == null)
+        {
+            _frameCallback = WlSurface.Frame(new FrameListener(this));
+            WlSurface.Commit();
+        }
+
+        return true;
+    }
 
     public virtual PlatformRenderTargetState State =>
         (Globals != null && WlSurface != null && !IsFrameCallbackPending) ? PlatformRenderTargetState.Ready : default;
@@ -735,9 +766,28 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
     // TODO: Wait for V2 version of the protocol to gain more adoption and implement it on our side
     private bool _csdSticky;
 
+    private OrgKdeKwinAppmenu? _appmenu;
+    private string? _appmenuServiceName;
+    private string? _appmenuObjectPath;
+
+    private OrgKdeKwinServerDecorationPalette? _palette;
+    private string? _paletteName;
+
+    private WaylandIconData? _iconData;
+    private WaylandToplevelIcon? _icon;
+
     public WXdgTopLevel(WaylandWorker worker, WXdgTopLevelEventSinkProxy eventSink) : base(worker, eventSink)
     {
         _topLevelEventSink = eventSink;
+    }
+
+    protected override void MaybeEmitWindowGeometry(PixelSize bufferPixelSize, double bufferScale, Size logicalSize)
+    {
+        base.MaybeEmitWindowGeometry(bufferPixelSize, bufferScale, logicalSize);
+        SetInputRect(ShadowExtents != default && LastWindowGeometry is { } geometry
+            ? new Rect(geometry.Left, geometry.Top, geometry.Width, geometry.Height)
+                .Inflate(ResizeGripLayer.MaxShadowGripThickness)
+            : null);
     }
 
     public override void OnConnected(WaylandConnection connection, WaylandGlobals globals)
@@ -764,6 +814,10 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
         var effectiveAppId = _appId ?? Globals.AppId;
         if (effectiveAppId != null)
             _xdgTopLevel.SetAppId(effectiveAppId);
+
+        ApplyAppmenuAddress();
+        ApplyDecorationPalette();
+        ApplyIcon(commit: false);
 
         // Re-apply cached min/max if they were ever set on a previous
         // (now-dead) connection. The OnConnected commit below will
@@ -925,6 +979,74 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
         _decoration = null;
     }
 
+    public void SetAppmenuAddress(string serviceName, string objectPath)
+    {
+        _appmenuServiceName = serviceName;
+        _appmenuObjectPath = objectPath;
+        ApplyAppmenuAddress();
+    }
+
+    private void ApplyAppmenuAddress()
+    {
+        if (_appmenuServiceName is not { } serviceName || _appmenuObjectPath is not { } objectPath)
+            return;
+        if (Globals?.AppmenuManager is not { } manager || WlSurface is not { } surface
+            || Connection is not { } connection)
+            return;
+        _appmenu ??= manager.Create(surface, new AppmenuListener(), connection.Queue);
+        _appmenu.SetAddress(serviceName, objectPath);
+    }
+
+    // org_kde_kwin_appmenu has no events, but NWayland requires a listener whenever a target queue
+    // is specified.
+    private sealed class AppmenuListener : OrgKdeKwinAppmenu.Listener;
+
+    public void SetDecorationPalette(string palette)
+    {
+        _paletteName = palette;
+        ApplyDecorationPalette();
+    }
+
+    private void ApplyDecorationPalette()
+    {
+        if (_paletteName is not { } palette)
+            return;
+        if (Globals?.DecorationPaletteManager is not { } manager || WlSurface is not { } surface
+            || Connection is not { } connection)
+            return;
+        _palette ??= manager.Create(surface, new PaletteListener(), connection.Queue);
+        _palette.SetPalette(palette);
+    }
+
+    // org_kde_kwin_server_decoration_palette has no events, but NWayland requires a listener
+    // whenever a target queue is specified.
+    private sealed class PaletteListener : OrgKdeKwinServerDecorationPalette.Listener;
+
+    public void SetIcon(WaylandIconData? icon)
+    {
+        _iconData = icon;
+        ApplyIcon(commit: true);
+    }
+
+    private void ApplyIcon(bool commit)
+    {
+        if (_iconData == null && _icon == null)
+            return;
+        if (Globals?.ToplevelIconManager is not { } manager || _xdgTopLevel == null
+            || Connection is not { } connection)
+            return;
+
+        var previous = _icon;
+        _icon = _iconData is { } data
+            ? WaylandToplevelIcon.TryCreate(manager, Globals.WlShm, connection, data)
+            : null;
+        manager.SetIcon(_xdgTopLevel, _icon?.Icon!);
+        // set_icon is double-buffered and only takes effect on the next surface commit.
+        if (commit)
+            WlSurface!.Commit();
+        previous?.Dispose();
+    }
+
     internal class TopLevelListener(WXdgTopLevel p) : XdgToplevel.Listener
     {
         protected override void ConfigureBounds(XdgToplevel eventSender, int width, int height) => 
@@ -946,6 +1068,20 @@ class WXdgTopLevel : WXdgShellSurface, IWXdgTopLevel
         foreach (var ex in _activeExports.ToList())
             ex.Dispose();
         _activeExports.Clear();
+        if (_appmenu != null)
+        {
+            _appmenu.Release();
+            _appmenu.Dispose();
+            _appmenu = null;
+        }
+        if (_palette != null)
+        {
+            _palette.Release();
+            _palette.Dispose();
+            _palette = null;
+        }
+        _icon?.Dispose();
+        _icon = null;
         _decoration?.Destroy();
         _decoration = null;
         _xdgTopLevel?.Destroy();

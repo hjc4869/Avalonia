@@ -1,5 +1,8 @@
 # Wayland platform
 
+Client-decorated windows keep their full shadows, with resizing confined to a narrow band beside
+the visible frame. Pointer and touch input in the outer shadow passes through to windows behind it.
+
 
 ## Special considerations
 
@@ -190,6 +193,27 @@ parametric description with the default sRGB luminances puts the reference white
 `EGL_EXT_gl_colorspace_scrgb_linear`, so it is preferred and `create_windows_scrgb` is only a
 fallback.
 
+## Client-side title bars
+
+A left-button press or touch on an element with the `TitleBar` decoration role starts an
+interactive `xdg_toplevel.move`. A second press of the same pointer type within the platform
+double-tap time and size toggles between the normal and maximized states instead, honoring
+`CanResize` and `CanMaximize`. Full-screen windows, and windows that cannot change state, keep the
+move request.
+
+### Resize grips and shadow input
+
+Drawn resize grips cover the frame plus up to 4 DIPs of the adjacent shadow on each side.
+`TopLevelHost` insets the grip layer by the remaining shadow thickness, keeping its edge and corner
+roles aligned with the visible frame.
+
+Before attaching each top-level buffer, the Wayland worker stages a `wl_surface` input region
+covering the window geometry inflated by the same 4-DIP shadow band. The compositor clips that
+region to the surface bounds. Input-region changes commit with the buffer and window geometry,
+including resizing, scaling, decoration changes, and maximized/full-screen transitions. Disabling
+hit testing still installs an empty input region; reconnecting replays the cached region. Popups
+retain their own input behavior.
+
 ## Protocol docs
 
 Do NOT assume things about Wayland protocols. Those could be rather non-intuitive. Always check what the protocol says
@@ -223,6 +247,16 @@ Entities bound to a connection defined in Server/Transient dir, they should be c
 Since wayland asks us nicely to NOT render when we want to, but instead tells us when to, the render timer is not an actual
 timer, but something that gets triggered by frame callbacks. So if we expect the render timer to do something useful 
 for e. g. new surface, we need to wake it up explicitly.
+
+Ordinary composition wakeups are coalesced and handled on the Wayland worker. Mapped surfaces request a frame callback,
+reusing an outstanding request when possible. A callback-only commit does not attach another buffer or force a redraw.
+Render tasks that request another tick keep these callbacks active even when the current tick has no new pixels to submit.
+Once no task needs another tick, the loop stops requesting callbacks.
+
+With no mapped surface, composition work can run immediately. Native platform jobs can also wake the loop immediately.
+Batches deferred for a frame callback arm the starvation timer, including out-of-band disposal batches. This lets an
+occluded window make bounded progress even when the compositor withholds its frame callbacks. Frame requests use the
+surface's out-of-band commit guard, so they do not commit an unconfigured xdg surface.
 For inevitable oversights there is currently a "fallback" timer that ticks at 20FPS, but it should be removed once
 we are sure that all the cases are covered (this will likely require some refactoring of UI thread's animation engine).
 

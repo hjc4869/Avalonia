@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Platform;
@@ -15,22 +16,50 @@ using Avalonia.FreeDesktop.DBus;
 
 namespace Avalonia.FreeDesktop
 {
+    /// <summary>
+    /// Implemented by exporters that can also hand their bus address to the windowing system
+    /// directly, for compositors that associate windows with menus themselves instead of going
+    /// through com.canonical.AppMenu.Registrar (KWin's <c>org_kde_kwin_appmenu</c>).
+    /// </summary>
+    internal interface IDBusMenuAddressProvider
+    {
+        string? ServiceName { get; }
+        string ObjectPath { get; }
+    }
+
     internal class DBusMenuExporter
     {
         public static ITopLevelNativeMenuExporter? TryCreateTopLevelNativeMenu(IntPtr xid) =>
-            DBusHelper.DefaultConnection is {} conn ?  new DBusMenuExporterImpl(conn, xid) : null;
+            DBusHelper.DefaultConnection is {} conn ?  new DBusMenuExporterImpl(conn, (uint)xid.ToInt32()) : null;
+
+        /// <summary>
+        /// Creates a top level exporter for windowing systems that have no X window ID (Wayland).
+        /// The menu is still registered with com.canonical.AppMenu.Registrar under a synthetic
+        /// window ID for consumers that can use it, but the association that actually works on
+        /// Wayland is made by the caller via <see cref="IDBusMenuAddressProvider"/>.
+        /// </summary>
+        public static ITopLevelNativeMenuExporter? TryCreateTopLevelNativeMenu() =>
+            DBusHelper.DefaultConnection is { } conn ? new DBusMenuExporterImpl(conn, NextSyntheticWindowId()) : null;
 
         public static INativeMenuExporter TryCreateDetachedNativeMenu(string path, DBusConnection currentConnection) =>
             new DBusMenuExporterImpl(currentConnection, path);
 
         public static string GenerateDBusMenuObjPath => $"/net/avaloniaui/dbusmenu/{Guid.NewGuid():N}";
 
-        private sealed class DBusMenuExporterImpl : DBusHandler, IdbusmenuHandler, IdbusmenuProperties, ITopLevelNativeMenuExporter, IDisposable
+        private static int s_syntheticWindowIdCounter = new Random().Next();
+
+        // Registrar implementations key menus by window ID across all clients, so the value has to be
+        // unique process-wide *and* machine-wide. X server IDs never use the top bits, so staying above
+        // them keeps us clear of any real window on an XWayland-mixed session.
+        private static uint NextSyntheticWindowId() =>
+            0x80000000u | (uint)(Interlocked.Increment(ref s_syntheticWindowIdCounter) & 0x7FFFFFFF);
+
+        private sealed class DBusMenuExporterImpl : DBusHandler, IdbusmenuHandler, IdbusmenuProperties, ITopLevelNativeMenuExporter, IDBusMenuAddressProvider, IDisposable
         {
             private readonly Dictionary<int, NativeMenuItemBase> _idsToItems = new();
             private readonly Dictionary<NativeMenuItemBase, int> _itemsToIds = new();
             private readonly HashSet<NativeMenu> _menus = [];
-            private readonly uint _xid;
+            private readonly uint _windowId;
             private readonly bool _appMenu = true;
             private Registrar? _registrar;
             private NativeMenu? _menu;
@@ -39,10 +68,10 @@ namespace Avalonia.FreeDesktop
             private bool _resetQueued;
             private int _nextId = 1;
 
-            public DBusMenuExporterImpl(DBusConnection connection, IntPtr xid)
+            public DBusMenuExporterImpl(DBusConnection connection, uint windowId)
                 : base(connection, GenerateDBusMenuObjPath, handlesChildPaths: false)
             {
-                _xid = (uint)xid.ToInt32();
+                _windowId = windowId;
                 SetNativeMenu([]);
                 _ = InitializeAsync();
             }
@@ -59,6 +88,9 @@ namespace Avalonia.FreeDesktop
             string IdbusmenuProperties.TextDirection => "ltr";
             string IdbusmenuProperties.Status => "normal";
             string[] IdbusmenuProperties.IconThemePath => [];
+
+            string? IDBusMenuAddressProvider.ServiceName => Connection.UniqueName;
+            string IDBusMenuAddressProvider.ObjectPath => Path;
 
             ValueTask IdbusmenuHandler.HandleGetPropertyAsync(IdbusmenuHandler.GetPropertyContext context)
                 => context.Handle(this);
@@ -113,7 +145,7 @@ namespace Avalonia.FreeDesktop
                 try
                 {
                     if (!_disposed)
-                        await _registrar.RegisterWindowAsync(_xid, Path);
+                        await _registrar.RegisterWindowAsync(_windowId, Path);
                 }
                 catch
                 {
@@ -131,7 +163,7 @@ namespace Avalonia.FreeDesktop
                     return;
                 _disposed = true;
                 // Fire and forget
-                _ = _registrar?.UnregisterWindowAsync(_xid)?.ContinueWith(t =>
+                _ = _registrar?.UnregisterWindowAsync(_windowId)?.ContinueWith(t =>
                 {
                     if (t.Exception != null)
                     {
