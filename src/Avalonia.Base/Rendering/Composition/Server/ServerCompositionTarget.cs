@@ -28,6 +28,8 @@ namespace Avalonia.Rendering.Composition.Server
         private IRenderTarget? _renderTarget;
         private PixelSize _layerSize;
         private IDrawingContextLayerImpl? _layer;
+        private PlatformSurfaceColorVolume? _layerColorVolume;
+        private PlatformSurfaceColorVolume? _renderedColorVolume;
         private PartialPresentationDirtyRectHistory? _partialPresentationHistory;
         private Matrix _outputTransform = Matrix.Identity;
         private bool _updateRequested;
@@ -170,6 +172,7 @@ namespace Avalonia.Rendering.Composition.Server
             {
                 _layer?.Dispose();
                 _layer = null;
+                _layerColorVolume = null;
                 _renderTarget.Dispose();
                 _renderTarget = null;
                 _redrawRequested = true;
@@ -273,9 +276,19 @@ namespace Avalonia.Rendering.Composition.Server
                 {
                     using (var renderTiming = Diagnostic.BeginCompositorRenderPass())
                     {
+                        // Retained layers created for a different color volume need to be recreated, and
+                        // retained output contents rendered for it need to be repainted.
+                        if (_layer != null && _layerColorVolume != properties.PreferredColorVolume)
+                        {
+                            _layer.Dispose();
+                            _layer = null;
+                            _layerColorVolume = null;
+                        }
+
+                        var colorVolumeChanged = _renderedColorVolume != properties.PreferredColorVolume;
                         var recreateLayer = needLayer &&
                                             (PixelSize != _layerSize || _layer == null || _layer.IsCorrupted);
-                        if (_fullRedrawRequested || recreateLayer
+                        if (_fullRedrawRequested || recreateLayer || colorVolumeChanged
                                                  || (!needLayer && !usePartialPresentation &&
                                                      !properties.PreviousFrameIsRetained))
                         {
@@ -307,13 +320,16 @@ namespace Avalonia.Rendering.Composition.Server
                         {
                             _layer?.Dispose();
                             _layer = null;
+                            _layerColorVolume = null;
                             _layer = renderTargetContext.CreateLayer(PixelSize);
                             _layerSize = PixelSize;
+                            _layerColorVolume = properties.PreferredColorVolume;
                         }
                         else if (!needLayer)
                         {
                             _layer?.Dispose();
                             _layer = null;
+                            _layerColorVolume = null;
                         }
 
                         // For retained layer we are rendering before taking partial presentation into consideration
@@ -381,6 +397,7 @@ namespace Avalonia.Rendering.Composition.Server
                 // Record frame into history
                 partialPresentationHistory?.AfterSuccessfulDraw();
                 // Reset state
+                _renderedColorVolume = properties.PreferredColorVolume;
                 _fullRedrawRequested = false;
                 _redrawRequested = false;
                 DirtyRects.Initialize(renderBounds);
@@ -448,6 +465,7 @@ namespace Avalonia.Rendering.Composition.Server
                     {
                         _layer.Dispose();
                         _layer = null;
+                        _layerColorVolume = null;
                     }
                     _renderTarget?.Dispose();
                     _renderTarget = null;
@@ -459,6 +477,7 @@ namespace Avalonia.Rendering.Composition.Server
                 // Set to null for now
                 // TODO: Check per-platform to make sure that it's safe to dispose anyay
                 _layer = null;
+                _layerColorVolume = null;
                 _renderTarget = null;
                 
             }

@@ -20,6 +20,9 @@
 @end
 
 @interface MetalRenderTarget : NSObject<IRenderTarget>
--(MetalRenderTarget*) initWithDevice: (const ComPtr<IAvnMetalDevice>&) device;
+-(MetalRenderTarget*) initWithDevice: (const ComPtr<IAvnMetalDevice>&) device extendedLinear: (bool) extendedLinear;
 -(ComPtr<IAvnMetalRenderTarget>) createRenderTarget;
+-(AvnPixelFormat) pixelFormat;
+-(void) setColorInfo: (AvnSurfaceColorInfo) info;
+-(void) setHdrContent: (bool) hasHdrContent;
 @end

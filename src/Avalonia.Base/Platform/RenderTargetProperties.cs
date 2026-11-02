@@ -76,6 +76,12 @@ public struct RenderTargetProperties
     /// the drawing context and partial presentation rectangles use native framebuffer coordinates.
     /// </summary>
     public SurfaceOrientation RequiredRotationForOrientation { get; init; }
+
+    /// <summary>
+    /// The pixel encoding and color space the render target was actually created with.
+    /// Defaults to the legacy non color managed 8 bit sRGB format.
+    /// </summary>
+    public PlatformSurfaceColorFormat ColorFormat { get; init; }
 }
 
 [PrivateApi]
@@ -86,4 +92,10 @@ public struct RenderTargetDrawingContextProperties
     /// Indicates that the drawing context targets a surface that preserved its contents since the previous frame
     /// </summary>
     public bool PreviousFrameIsRetained { get; init; }
+
+    /// <summary>
+    /// The color volume snapshotted for this drawing session, or null when unavailable.
+    /// Retained intermediate layers created for a different volume need to be recreated.
+    /// </summary>
+    public PlatformSurfaceColorVolume? PreferredColorVolume { get; init; }
 }

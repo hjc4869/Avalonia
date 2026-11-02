@@ -188,6 +188,8 @@ namespace Avalonia.Win32
 
             lock (s_instances)
                 s_instances.Add(this);
+
+            StartPreferredColorVolumeTracking();
         }
 
         internal IInputRoot Owner
@@ -370,6 +372,11 @@ namespace Avalonia.Win32
             if (featureType == typeof(IInputPane))
             {
                 return _inputPane;
+            }
+
+            if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            {
+                return this;
             }
 
             if (featureType == typeof(ILauncher))
@@ -660,6 +667,7 @@ namespace Avalonia.Win32
         {
             _inputPane?.Dispose();
             _inputPane = null;
+            DisposePreferredColorVolumeTracking();
             if (_hwnd != IntPtr.Zero)
             {
                 // Detect if we are being closed programmatically - this would mean that WM_CLOSE was not called

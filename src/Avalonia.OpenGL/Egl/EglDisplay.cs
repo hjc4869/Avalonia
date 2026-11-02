@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using Avalonia.Platform;
 using Avalonia.Reactive;
 using static Avalonia.OpenGL.Egl.EglConsts;
 
@@ -20,6 +21,12 @@ namespace Avalonia.OpenGL.Egl
 
         public IntPtr Handle => _display;
         public IntPtr Config => _config.Config;
+
+        /// <summary>
+        /// The pixel encoding and color space negotiated for this display's EGL config.
+        /// </summary>
+        public PlatformSurfaceColorFormat ColorFormat => _config.ColorBufferFormat.SurfaceColorFormat;
+
         internal bool SingleContext => !_options.SupportsMultipleContexts;
         private readonly List<EglContext> _contexts = new();
         internal bool SupportsBufferAge { get; }
@@ -50,7 +57,7 @@ namespace Avalonia.OpenGL.Egl
                 throw new ArgumentException();
 
             _config = EglDisplayUtils.InitializeAndGetConfig(_egl, display, options.GlVersions, options.ProbeConfig,
-                options.AllowPbufferOnlyConfigs);
+                options.AllowPbufferOnlyConfigs, options.ColorBufferFormats, options.UseEglWindowSurfaceColorSpace);
             var extensions = new HashSet<string>(
                 (_egl.QueryString(display, EGL_EXTENSIONS) ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries));
             SupportsBufferAge = extensions.Contains("EGL_EXT_buffer_age");
@@ -131,8 +138,11 @@ namespace Avalonia.OpenGL.Egl
 
             using (Lock())
             {
+                var attributes = _options.UseEglWindowSurfaceColorSpace
+                    ? EglDisplayUtils.GetWindowSurfaceAttributes(_config.ColorBufferFormat.ColorSpace)
+                    : new[] { EGL_NONE };
                 var s = EglInterface.CreateWindowSurface(Handle, Config, window,
-                    new[] { EGL_NONE, EGL_NONE });
+                    attributes);
                 if (s == IntPtr.Zero)
                     throw OpenGlException.GetFormattedException("eglCreateWindowSurface", EglInterface);
                 return new EglSurface(this, s);

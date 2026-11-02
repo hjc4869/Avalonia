@@ -28,6 +28,18 @@ namespace Avalonia
         Metal
     }
 
+    /// <summary>The requested color policy for iOS rendering surfaces.</summary>
+    public enum iOSColorMode
+    {
+        /// <summary>Color-managed, 8-bit sRGB Metal output.</summary>
+        Standard,
+        /// <summary>
+        /// Extended-linear sRGB on Metal, supporting wide gamut and HDR in one FP16 surface.
+        /// Requires iOS or Mac Catalyst 16 or later. Other paths retain SDR output.
+        /// </summary>
+        ExtendedLinear
+    }
+
     /// <summary>
     /// iOS backend options.
     /// </summary>
@@ -53,6 +65,12 @@ namespace Avalonia
         /// Set this to false to keep the system's default rate, for example if the app can't sustain high frame rates.
         /// </remarks>
         public bool EnableHighRefreshRate { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets the requested surface color policy. The default is color-managed sRGB
+        /// on Metal. Use <see cref="IPlatformHdrContentFeature"/> to declare visible HDR content.
+        /// </summary>
+        public iOSColorMode ColorMode { get; set; } = iOSColorMode.Standard;
     }
 
     public static class IOSApplicationExtensions

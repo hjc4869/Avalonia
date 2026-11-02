@@ -29,8 +29,11 @@ namespace Avalonia.OpenGL.Egl
         protected virtual RenderTargetProperties Properties => new()
         {
             SupportsPartialPresentation = UsePartialPresentation && Context.Display.SupportsBufferAge,
+            // Skia snapshots the wrapped default framebuffer with CopyTexSubImage, which GLES leaves undefined
+            // for floating point default framebuffers, so drawing that samples the surface needs the retained layer.
             IsSuitableForDirectRendering = UsePartialPresentation && Context.StencilSize >= 8
                 && _partialPresentation?.PreferRetainedLayer != true
+                && ColorFormat.Encoding != PlatformPixelEncoding.RgbaF16
         };
 
         protected EglPlatformSurfaceRenderTargetBase(EglContext context)
@@ -53,6 +56,15 @@ namespace Avalonia.OpenGL.Egl
         }
 
         protected virtual bool SkipWaits => false;
+
+        public virtual PlatformSurfaceColorFormat ColorFormat => Context.Display.ColorFormat;
+
+        /// <summary>
+        /// The color volume the platform currently prefers for this surface. Read once per frame in
+        /// <see cref="BeginDraw(EglSurface, PixelSize, double, Action?, bool, Action?)"/> so the
+        /// value stays stable for the whole session.
+        /// </summary>
+        protected virtual PlatformSurfaceColorVolume? PreferredColorVolume => null;
 
         public abstract IGlPlatformSurfaceRenderingSession BeginDrawCore(IRenderTarget.RenderTargetSceneInfo sceneInfo);
 
@@ -107,7 +119,8 @@ namespace Avalonia.OpenGL.Egl
                 }
                 success = true;
                 return new Session(Context.Display, Context, surface, size, scaling, restoreContext,
-                    onFinish, isYFlipped, SkipWaits, beforeSwap, partial, OnSwapBuffersFailed);
+                    onFinish, isYFlipped, SkipWaits, beforeSwap, partial, OnSwapBuffersFailed, ColorFormat,
+                    PreferredColorVolume);
             }
             finally
             {
@@ -136,11 +149,14 @@ namespace Avalonia.OpenGL.Egl
             public Session(EglDisplay display, EglContext context,
                 EglSurface glSurface, PixelSize size, double scaling,
                 IDisposable restoreContext, Action? onFinish, bool isYFlipped, bool skipWaits,
-                Action? beforeSwap, EglPartialPresentation.Session? partial, Action onSwapFailed)
+                Action? beforeSwap, EglPartialPresentation.Session? partial, Action onSwapFailed,
+                PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume)
             {
                 Size = size;
                 Scaling = scaling;
                 IsYFlipped = isYFlipped;
+                ColorFormat = colorFormat;
+                PreferredColorVolume = preferredColorVolume;
                 _context = context;
                 _display = display;
                 _glSurface = glSurface;
@@ -206,6 +222,8 @@ namespace Avalonia.OpenGL.Egl
             public PixelSize Size { get; }
             public double Scaling { get; }
             public bool IsYFlipped { get; }
+            public PlatformSurfaceColorFormat ColorFormat { get; }
+            public PlatformSurfaceColorVolume? PreferredColorVolume { get; }
         }
 
         public virtual PlatformRenderTargetState State =>

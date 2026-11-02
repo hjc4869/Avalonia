@@ -70,6 +70,9 @@ namespace Avalonia.Win32.OpenGl
                     _hdc = hdc;
                     _info = info;
                     _clearContext = clearContext;
+                    PreferredColorVolume =
+                        (info as EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume)
+                        ?.PreferredColorVolume;
                 }
 
                 public void Dispose()
@@ -82,6 +85,7 @@ namespace Avalonia.Win32.OpenGl
                 public PixelSize Size => _info.Size;
                 public double Scaling => _info.Scaling;
                 public bool IsYFlipped { get; }
+                public PlatformSurfaceColorVolume? PreferredColorVolume { get; }
             }
         }
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Android.App;
 using Android.Content;
 using Android.Graphics;
@@ -23,12 +24,16 @@ using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Platform.Surfaces;
 using Avalonia.Rendering.Composition;
+using Avalonia.Threading;
 using Java.Lang;
+using Java.Util.Functions;
 using ClipboardManager = Android.Content.ClipboardManager;
 
 namespace Avalonia.Android.Platform.SkiaPlatform
 {
-    class TopLevelImpl : ITopLevelImpl, EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithWaitPolicy
+    class TopLevelImpl : ITopLevelImpl, IPlatformSurfaceColorVolumeFeature, IPlatformHdrContentFeature,
+        EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume,
+        EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithWaitPolicy
     {
         private readonly Context _context;
         private AvaloniaView? _avaloniaView;
@@ -41,12 +46,17 @@ namespace Avalonia.Android.Platform.SkiaPlatform
         private readonly AndroidInsetsManager? _insetsManager;
         private readonly Clipboard _clipboard;
         private readonly AndroidLauncher? _launcher;
-        private readonly AndroidScreens? _screens;
+        private AndroidScreens? _screens;
         private readonly AndroidPlatformFeedback _feedback;
         private SurfaceViewImpl? _view;
         private WindowTransparencyLevel _transparencyLevel;
         private PixelPoint _position;
         private int[] _positionArray = new int[2];
+        private Display? _hdrSdrRatioDisplay;
+        private HdrSdrRatioChangedListener? _hdrSdrRatioListener;
+        private ColorVolumeState _colorVolumeState = new(null);
+        private bool _hasHdrContent;
+        private PlatformHdrContentMetadata? _hdrContentMetadata;
 
         public TopLevelImpl(AvaloniaView avaloniaView, bool placeOnTop = false)
         {
@@ -65,8 +75,12 @@ namespace Avalonia.Android.Platform.SkiaPlatform
                 context.GetSystemService(Context.ClipboardService).JavaCast<ClipboardManager>(),
                 context));
             _screens = new AndroidScreens(context);
+            _screens.DisplaysChanged += OnDisplaysChanged;
             _feedback = new AndroidPlatformFeedback(avaloniaView);
             DragDrop = new AndroidDragDrop(this);
+
+            _view.SurfaceWindowCreated += OnSurfaceWindowCreated;
+            _view.SurfaceWindowDestroyed += OnSurfaceWindowDestroyed;
 
             if (context is Activity mainActivity)
             {
@@ -112,6 +126,23 @@ namespace Avalonia.Android.Platform.SkiaPlatform
 
         public Action<double>? ScalingChanged { get; set; }
 
+        public PlatformSurfaceColorVolume? PreferredColorVolume =>
+            Volatile.Read(ref _colorVolumeState).Value;
+
+        public event EventHandler? PreferredColorVolumeChanged;
+
+        public void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata)
+        {
+            Dispatcher.UIThread.VerifyAccess();
+            metadata = PlatformHdrContentMetadata.Normalize(hasHdrContent, metadata);
+            if (_view is not { } view || _hasHdrContent == hasHdrContent && _hdrContentMetadata == metadata)
+                return;
+
+            _hasHdrContent = hasHdrContent;
+            _hdrContentMetadata = metadata;
+            view.UpdateDesiredHdrHeadroom(view.Display);
+        }
+
         public View? View => _view;
 
         public AndroidDragDrop DragDrop { get; }
@@ -155,10 +186,25 @@ namespace Avalonia.Android.Platform.SkiaPlatform
 
         public virtual void Dispose()
         {
+            StopTrackingHdrSdrRatio();
+            if (_screens is { } screens)
+            {
+                _screens = null;
+                screens.DisplaysChanged -= OnDisplaysChanged;
+                screens.Dispose();
+            }
             _systemNavigationManager.Dispose();
             _avaloniaView?.LayoutChange -= AvaloniaView_LayoutChange;
             _avaloniaView = null;
-            _view?.Dispose();
+            if (_view is { } view)
+            {
+                view.SurfaceWindowCreated -= OnSurfaceWindowCreated;
+                view.SurfaceWindowDestroyed -= OnSurfaceWindowDestroyed;
+                // The view must leave the Java hierarchy before its peer is disposed: Android tears the window down
+                // after Activity.OnDestroy() and any override it invokes then would fail to resolve the dead peer.
+                (view.Parent as ViewGroup)?.RemoveView(view);
+                view.Dispose();
+            }
             _view = null;
             (DragDrop as IDisposable)?.Dispose();
         }
@@ -173,6 +219,116 @@ namespace Avalonia.Android.Platform.SkiaPlatform
             Resized?.Invoke(size, WindowResizeReason.Layout);
         }
 
+        internal void RefreshColorVolume()
+        {
+            if (_view is not { } view || !CanRender(view))
+            {
+                ClearColorVolume();
+                return;
+            }
+
+            var display = view.Display;
+            view.UpdateDesiredHdrHeadroom(display);
+            TrackHdrSdrRatio(display);
+            PublishColorVolume(AndroidPlatform.GetPreferredColorVolume(display));
+        }
+
+        private void OnSurfaceWindowCreated(object? sender, EventArgs e) => RefreshColorVolume();
+
+        private void OnSurfaceWindowDestroyed(object? sender, EventArgs e) => ClearColorVolume();
+
+        private void ClearColorVolume()
+        {
+            StopTrackingHdrSdrRatio();
+            PublishColorVolume(null);
+        }
+
+        private void RefreshColorVolumeFromRatioChange() => RefreshColorVolume();
+
+        private void PublishColorVolume(PlatformSurfaceColorVolume? colorVolume)
+        {
+            if (PreferredColorVolume == colorVolume)
+                return;
+
+            Volatile.Write(ref _colorVolumeState, new ColorVolumeState(colorVolume));
+            PreferredColorVolumeChanged?.Invoke(this, EventArgs.Empty);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_view is { } view && CanRender(view))
+                    Paint?.Invoke(null);
+            }, DispatcherPriority.Input);
+        }
+
+        private static bool CanRender(SurfaceViewImpl view) =>
+            view.IsAttachedToWindow && ((IPlatformHandle)view).Handle != IntPtr.Zero;
+
+        private void OnDisplaysChanged(int displayId) =>
+            Dispatcher.UIThread.Post(RefreshColorVolume, DispatcherPriority.Input);
+
+        private void TrackHdrSdrRatio(Display? display)
+        {
+            if (!OperatingSystem.IsAndroidVersionAtLeast(35))
+                return;
+
+            var shouldTrack = display?.IsHdrSdrRatioAvailable == true;
+            if (_hdrSdrRatioDisplay?.DisplayId == display?.DisplayId &&
+                (_hdrSdrRatioListener is not null) == shouldTrack)
+            {
+                return;
+            }
+
+            StopTrackingHdrSdrRatio();
+            if (!shouldTrack || display is null || _view?.Context?.MainExecutor is not { } executor)
+                return;
+
+            var listener = new HdrSdrRatioChangedListener(this);
+            try
+            {
+                display.RegisterHdrSdrRatioChangedListener(executor, listener);
+                _hdrSdrRatioDisplay = display;
+                _hdrSdrRatioListener = listener;
+            }
+            catch (IllegalStateException)
+            {
+                listener.Dispose();
+            }
+        }
+
+        private void StopTrackingHdrSdrRatio()
+        {
+            var display = _hdrSdrRatioDisplay;
+            var listener = _hdrSdrRatioListener;
+            _hdrSdrRatioDisplay = null;
+            _hdrSdrRatioListener = null;
+
+            if (listener is not null)
+            {
+                try
+                {
+                    if (OperatingSystem.IsAndroidVersionAtLeast(35) && display is not null)
+                        display.UnregisterHdrSdrRatioChangedListener(listener);
+                }
+                catch (IllegalStateException)
+                {
+                }
+                finally
+                {
+                    listener.Dispose();
+                }
+            }
+        }
+
+        private sealed class HdrSdrRatioChangedListener(TopLevelImpl owner) : Java.Lang.Object, IConsumer
+        {
+            public void Accept(Java.Lang.Object? value) =>
+                Dispatcher.UIThread.Post(owner.RefreshColorVolumeFromRatioChange, DispatcherPriority.Input);
+        }
+
+        private sealed class ColorVolumeState(PlatformSurfaceColorVolume? value)
+        {
+            public PlatformSurfaceColorVolume? Value { get; } = value;
+        }
+
         sealed class SurfaceViewImpl : InvalidationAwareSurfaceView
         {
             private readonly TopLevelImpl _tl;
@@ -183,8 +339,26 @@ namespace Avalonia.Android.Platform.SkiaPlatform
             public SurfaceViewImpl(Context context, TopLevelImpl tl, bool placeOnTop) : base(context)
             {
                 _tl = tl;
+                if (OperatingSystem.IsAndroidVersionAtLeast(35))
+                    UpdateDesiredHdrHeadroom(context.Display);
                 if (placeOnTop)
                     SetZOrderOnTop(true);
+            }
+
+            internal void UpdateDesiredHdrHeadroom(Display? display)
+            {
+                if (OperatingSystem.IsAndroidVersionAtLeast(35) && AndroidPlatform.IsExtendedLinearColorActive)
+                {
+                    SetDesiredHdrHeadroom(_tl._hasHdrContent
+                        ? (float)System.Math.Min(_tl._hdrContentMetadata?.HeadroomRatio ?? 0, 10_000)
+                        : 1);
+                }
+            }
+
+            protected override void OnConfigurationChanged(global::Android.Content.Res.Configuration? newConfig)
+            {
+                base.OnConfigurationChanged(newConfig);
+                _tl.RefreshColorVolume();
             }
 
             protected override void DispatchDraw(global::Android.Graphics.Canvas canvas)
@@ -290,6 +464,8 @@ namespace Avalonia.Android.Platform.SkiaPlatform
         public AcrylicPlatformCompensationLevels AcrylicCompensationLevels => new(1, 1, 1);
 
         IntPtr EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfo.Handle => (_view as IPlatformHandle)?.Handle ?? default;
+        PlatformSurfaceColorVolume? EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithColorVolume.PreferredColorVolume =>
+            PreferredColorVolume;
         bool EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfoWithWaitPolicy.SkipWaits => true;
         PixelSize EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfo.Size => _view?.Size ?? default;
         double EglGlPlatformSurface.IEglWindowGlPlatformSurfaceInfo.Scaling => _view?.Scaling ?? default;
@@ -401,6 +577,14 @@ namespace Avalonia.Android.Platform.SkiaPlatform
             if(featureType == typeof(IPlatformFeedback))
             {
                 return _feedback;
+            }
+            if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            {
+                return this;
+            }
+            if (featureType == typeof(IPlatformHdrContentFeature) && AndroidPlatform.IsExtendedLinearColorActive)
+            {
+                return this;
             }
             return null;
         }

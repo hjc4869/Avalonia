@@ -8,8 +8,8 @@ export class CanvasSurface {
     public targetId: number;
     private sizeParams?: [number, number, number];
 
-    constructor(public canvas: HTMLCanvasElement, modes: BrowserRenderingMode[], topLevelId: number, threadId: number) {
-        this.targetId = WebRenderTargetRegistry.create(threadId, canvas, modes);
+    constructor(public canvas: HTMLCanvasElement, modes: BrowserRenderingMode[], topLevelId: number, threadId: number, preferHdr: boolean) {
+        this.targetId = WebRenderTargetRegistry.create(threadId, canvas, modes, preferHdr);
         ResizeHandler.observeSize(canvas, (width, height, dpr) => {
             this.sizeParams = [width, height, dpr];
 
@@ -35,11 +35,11 @@ export class CanvasSurface {
     public destroy(): void {
     }
 
-    public static create(container: HTMLElement, modes: BrowserRenderingMode[], topLevelId: number, threadId: number): CanvasSurface {
+    public static create(container: HTMLElement, modes: BrowserRenderingMode[], topLevelId: number, threadId: number, preferHdr: boolean): CanvasSurface {
         const canvas = AvaloniaDOM.createAvaloniaCanvas(container);
         AvaloniaDOM.attachCanvas(container, canvas);
         try {
-            return new CanvasSurface(canvas, modes, topLevelId, threadId);
+            return new CanvasSurface(canvas, modes, topLevelId, threadId, preferHdr);
         } catch (ex) {
             AvaloniaDOM.detachCanvas(container, canvas);
             throw ex;

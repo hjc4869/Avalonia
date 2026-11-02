@@ -209,6 +209,8 @@ namespace Avalonia.Win32
                                 SetWindowPosFlags.SWP_NOACTIVATE);
                         }
 
+                        RefreshPreferredColorVolume();
+
                         return IntPtr.Zero;
                     }
 
@@ -729,7 +731,10 @@ namespace Avalonia.Win32
                     break;
 
                 case WindowsMessage.WM_SHOWWINDOW:
-                    OnShowHideMessage(wParam != default);
+                    var shown = wParam != default;
+                    OnShowHideMessage(shown);
+                    if (shown)
+                        RefreshPreferredColorVolume(checkDynamicState: true);
                     break;
 
                 case WindowsMessage.WM_SIZE:
@@ -785,6 +790,8 @@ namespace Avalonia.Win32
                             ExtendClientAreaToDecorationsChanged?.Invoke(true);
                         }
 
+                        RefreshPreferredColorVolume();
+
                         return IntPtr.Zero;
                     }
 
@@ -795,6 +802,7 @@ namespace Avalonia.Win32
                 case WindowsMessage.WM_MOVE:
                     {
                         PositionChanged?.Invoke(Position);
+                        RefreshPreferredColorVolume();
                         return IntPtr.Zero;
                     }
 
@@ -887,6 +895,14 @@ namespace Avalonia.Win32
                     _deadCharPending = false;
                     break;
 
+                case WindowsMessage.WM_DISPLAYCHANGE:
+                    RefreshPreferredColorVolume(force: true);
+                    break;
+
+                case WindowsMessage.WM_SETTINGCHANGE:
+                    RefreshPreferredColorVolume(checkDynamicState: true);
+                    break;
+
                 case WindowsMessage.WM_KILLFOCUS:
                     if (Imm32InputMethod.Current.IsComposing)
                     {
@@ -972,6 +988,7 @@ namespace Avalonia.Win32
                     {
                         OnShowHideMessage(false);
                     }
+                    RefreshPreferredColorVolume();
                     break;
             }
 
