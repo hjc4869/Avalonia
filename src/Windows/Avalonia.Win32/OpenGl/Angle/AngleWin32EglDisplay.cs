@@ -72,15 +72,7 @@ namespace Avalonia.Win32.OpenGl.Angle
                     ?.GraphicsAdapterSelectionCallback;
                 
                 void* pAdapter = null;
-                
-                var applyArmAdrenoBlacklist = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
-                
-                // As for now, we only need to redefine default adapter only on ARM64 just in case of Adreno GPU.
-                var redefineDefaultAdapter =
-                    selectionCallback != null
-                    || applyArmAdrenoBlacklist;
-                
-                if (redefineDefaultAdapter)
+                if (selectionCallback != null)
                 {
                     ushort adapterIndex = 0;
                     var adapters = new List<(IDXGIAdapter1 adapter, PlatformGraphicsDeviceAdapterDescription desc)>();
@@ -97,27 +89,10 @@ namespace Avalonia.Win32.OpenGl.Angle
                     if (adapters.Count == 0)
                         throw new OpenGlException("No adapters found");
 
-                    // The Adreno blacklist (see #10405) now only moves the *default* selection away
-                    // from Adreno GPUs - it no longer hides adapters from the selection callback, so
-                    // an application can deliberately opt back into hardware acceleration.
                     var chosenAdapterIndex = 0;
                     if (selectionCallback != null)
                     {
                         chosenAdapterIndex = selectionCallback(adapters.Select(a => a.desc).ToArray());
-                    }
-                    else if (applyArmAdrenoBlacklist && adapters.Count > 1)
-                    {
-                        var firstNonAdreno = adapters.FindIndex(a => a.desc.Description?.Contains("adreno") != true);
-                        if (firstNonAdreno > 0)
-                        {
-                            chosenAdapterIndex = firstNonAdreno;
-                            Logger.TryGet(LogEventLevel.Warning, "OpenGL")?.Log(null,
-                                "ARM64 Adreno GPU detected; the Adreno rendering blocklist is forcing a " +
-                                "fallback to '{FallbackAdapter}' (typically a software renderer). Set " +
-                                "Win32PlatformOptions.GraphicsAdapterSelectionCallback to choose an adapter " +
-                                "explicitly, or switch Win32PlatformOptions.RenderingMode to Vulkan or Wgl.",
-                                adapters[firstNonAdreno].desc.Description);
-                        }
                     }
 
                     chosenAdapter = adapters[chosenAdapterIndex].adapter.CloneReference();
