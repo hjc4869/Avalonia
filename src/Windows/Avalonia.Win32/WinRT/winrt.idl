@@ -288,6 +288,12 @@ interface IDispatcherQueue : IInspectable
     //TODO
 }
 
+[uuid(A96D83D7-9371-4517-9245-D0824AC12C74)]
+interface IDispatcherQueueStatics : IInspectable
+{
+    HRESULT GetForCurrentThread([out] [retval] IDispatcherQueue** value);
+}
+
 [uuid(22F34E66-50DB-4E36-A98D-61C01B384D20)]
 interface IDispatcherQueueController : IInspectable
 {
@@ -299,6 +305,49 @@ interface IDispatcherQueueController : IInspectable
 interface IActivationFactory : IInspectable
 {
     HRESULT ActivateInstance([out, retval] IntPtr* instance);
+}
+
+[uuid(7449121C-382B-4705-8DA7-A795BA482013)]
+interface IDisplayInformationStaticsInterop : IInspectable
+{
+    HRESULT GetForWindow([in] HWND window, [in] GUID* iid, [out] [retval] IntPtr* displayInformation);
+    HRESULT GetForMonitor([in] IntPtr monitor, [in] GUID* iid, [out] [retval] IntPtr* displayInformation);
+}
+
+[uuid(3A5442DC-2CDE-4A8D-80D1-21DC5ADCC1AA)]
+interface IDisplayInformation5 : IInspectable
+{
+    HRESULT GetAdvancedColorInfo([out] [retval] IAdvancedColorInfo** value);
+    HRESULT AddAdvancedColorInfoChanged([in] IDisplayInformationChangedHandler* handler,
+        [out] [retval] INT64* token);
+    HRESULT RemoveAdvancedColorInfoChanged([in] INT64 token);
+}
+
+[uuid(86C4F619-67B6-51C7-B30D-D8CF13625327)]
+interface IDisplayInformationChangedHandler : IUnknown
+{
+    HRESULT Invoke([in] IInspectable* sender, [in] IInspectable* args);
+}
+
+enum AdvancedColorKind
+{
+    StandardDynamicRange = 0,
+    WideColorGamut = 1,
+    HighDynamicRange = 2
+}
+
+[uuid(8797DCFB-B229-4081-AE9A-2CC85E34AD6A)]
+interface IAdvancedColorInfo : IInspectable
+{
+    [propget] HRESULT CurrentAdvancedColorKind([out] [retval] AdvancedColorKind* value);
+    [propget] HRESULT RedPrimary([out] [retval] Vector2* value);
+    [propget] HRESULT GreenPrimary([out] [retval] Vector2* value);
+    [propget] HRESULT BluePrimary([out] [retval] Vector2* value);
+    [propget] HRESULT WhitePoint([out] [retval] Vector2* value);
+    [propget] HRESULT MaxLuminanceInNits([out] [retval] FLOAT* value);
+    [propget] HRESULT MinLuminanceInNits([out] [retval] FLOAT* value);
+    [propget] HRESULT MaxAverageFullFrameLuminanceInNits([out] [retval] FLOAT* value);
+    [propget] HRESULT SdrWhiteLevelInNits([out] [retval] FLOAT* value);
 }
 
 [flags]

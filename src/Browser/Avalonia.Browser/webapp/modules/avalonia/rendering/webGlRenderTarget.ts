@@ -10,6 +10,20 @@ interface EmscriptenGL {
     makeContextCurrent: (handle: number) => boolean;
 }
 
+interface HdrToneMapping {
+    mode: "standard" | "extended";
+}
+
+interface HdrCanvas {
+    configureHighDynamicRange?: (options: HdrToneMapping) => void;
+}
+
+interface HdrWebGlContext {
+    drawingBufferColorSpace: string;
+    drawingBufferStorage?: (format: number, width: number, height: number) => void;
+    drawingBufferToneMapping?: (options: HdrToneMapping) => HdrToneMapping;
+}
+
 function getGL(): EmscriptenGL {
     const self = globalThis as any;
     const module = self.Module ?? self.getDotnetRuntime(0)?.Module;
@@ -23,9 +37,10 @@ export class WebGlRenderTarget extends WebRenderTarget {
     public stencil?: number;
     public sample?: number;
     public depth?: number;
+    public readonly isHdr: boolean;
     private static _gl: EmscriptenGL | null = null;
 
-    constructor(public canvas: HTMLCanvasElement | OffscreenCanvas, mode: BrowserRenderingMode) {
+    constructor(public canvas: HTMLCanvasElement | OffscreenCanvas, mode: BrowserRenderingMode, enableHdr = false) {
         // Skia only understands WebGL context wrapped in Emscripten.
         if (WebGlRenderTarget._gl == null) { WebGlRenderTarget._gl = getGL(); }
         if (!WebGlRenderTarget._gl) {
@@ -56,16 +71,57 @@ export class WebGlRenderTarget extends WebRenderTarget {
             throw new Error("HTMLCanvasElement.getContext returned null.");
         }
 
+        const isHdr = enableHdr && mode !== BrowserRenderingMode.WebGL1 &&
+            WebGlRenderTarget.tryEnableHdr(canvas, context as WebGL2RenderingContext);
         const handle = WebGlRenderTarget._gl.registerContext(context, attrs);
         (context as any).gl_handle = handle;
         super(canvas, "webgl");
 
+        this.isHdr = isHdr;
         this.contextHandle = handle;
         this.fboId = context.getParameter(context.FRAMEBUFFER_BINDING)?.id ?? 0;
         this.stencil = context.getParameter(context.STENCIL_BITS);
         this.sample = context.getParameter(context.SAMPLES);
         this.depth = context.getParameter(context.DEPTH_BITS);
         this.attrs = attrs;
+    }
+
+    private static tryEnableHdr(canvas: HTMLCanvasElement | OffscreenCanvas, context: WebGL2RenderingContext): boolean {
+        const hdrCanvas = canvas as HdrCanvas;
+        const hdrContext = context as unknown as HdrWebGlContext;
+        if (typeof hdrContext.drawingBufferStorage !== "function" ||
+            (typeof hdrContext.drawingBufferToneMapping !== "function" &&
+                typeof hdrCanvas.configureHighDynamicRange !== "function") ||
+            !context.getExtension("EXT_color_buffer_float")) {
+            return false;
+        }
+
+        const setToneMapping = (mode: "standard" | "extended") => {
+            if (hdrContext.drawingBufferToneMapping) {
+                hdrContext.drawingBufferToneMapping({ mode });
+            } else {
+                hdrCanvas.configureHighDynamicRange!({ mode });
+            }
+        };
+
+        try {
+            hdrContext.drawingBufferColorSpace = "srgb-linear";
+            if (hdrContext.drawingBufferColorSpace !== "srgb-linear") {
+                throw new Error("Linear sRGB canvas output is not supported.");
+            }
+            hdrContext.drawingBufferStorage(context.RGBA16F, canvas.width, canvas.height);
+            setToneMapping("extended");
+            if (context.getError() !== context.NO_ERROR || context.getParameter(context.RED_BITS) !== 16) {
+                throw new Error("The browser did not allocate a float16 drawing buffer.");
+            }
+            return true;
+        } catch (error) {
+            hdrContext.drawingBufferColorSpace = "srgb";
+            hdrContext.drawingBufferStorage(context.RGBA8, canvas.width, canvas.height);
+            setToneMapping("standard");
+            console.warn("Avalonia: HDR initialization failed; using SDR.", error);
+            return false;
+        }
     }
 
     public static getCurrentContext(): number {

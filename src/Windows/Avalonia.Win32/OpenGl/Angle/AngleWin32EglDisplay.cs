@@ -30,6 +30,7 @@ namespace Avalonia.Win32.OpenGl.Angle
             ContextLossIsDisplayLoss = true,
             GlVersions = AvaloniaLocator.Current.GetService<AngleOptions>()?.GlProfiles
                 .Where(x => x.Type == GlProfileType.OpenGLES),
+            ColorBufferFormats = Win32SurfaceColorFormat.RequestedColorBufferFormats,
             DeviceLostCheckCallback = deviceLostCheckCallback,
             DisposeCallback = disposeCallback
         };

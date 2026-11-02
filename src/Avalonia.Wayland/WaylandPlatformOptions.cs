@@ -81,6 +81,14 @@ public class WaylandPlatformOptions
     public bool? UseDmabufSwapchain { get; set; }
 
     /// <summary>
+    /// Ordered color presentation preferences. Each candidate needs <c>wp_color_manager_v1</c> support
+    /// and a matching EGL config; unsupported candidates are skipped. <see cref="WaylandColorPresentationMode.Sdr"/>
+    /// ends negotiation and is the implicit final fallback, so null or empty selects SDR. Only WSI
+    /// rendering supports advanced color.
+    /// </summary>
+    public IReadOnlyList<WaylandColorPresentationMode>? ColorPresentationPreferences { get; set; }
+
+    /// <summary>
     /// If this option is set to true, a GMainLoop and GSource based dispatcher implementation will be used for the
     /// UI thread instead of the default managed one.
     /// Use this if you need to use GLib-based libraries on the main thread.
@@ -108,4 +116,38 @@ public class WaylandPlatformOptions
             //
         }
     }
+}
+
+/// <summary>
+/// Supported Wayland color presentations: SDR outputs, and HDR transports with their highlight-mapping
+/// policy. Advanced color candidates prefer an FP16 surface.
+/// </summary>
+public enum WaylandColorPresentationMode
+{
+    /// <summary>Standard untagged 8-bit sRGB output; terminates preference negotiation.</summary>
+    Sdr,
+    /// <summary>
+    /// FP16 gamma 2.2 wide gamut output with BT.2020 primaries, or Display P3 when BT.2020 is
+    /// unavailable. Skipped without FP16 support. Skia converts sRGB colors into the wider space and
+    /// blending stays gamma-encoded.
+    /// </summary>
+    WideColorGamut,
+    /// <summary>Reference-white-relative FP16 linear input with client highlight fitting.</summary>
+    LinearRelative,
+    /// <summary>Reference-white-relative FP16 linear input with compositor perceptual mapping.</summary>
+    LinearPerceptual,
+    /// <summary>Fixed 80-nit FP16 Windows-scRGB input with client highlight fitting.</summary>
+    WindowsScRgbRelative,
+    /// <summary>Fixed 80-nit FP16 Windows-scRGB input with compositor perceptual mapping.</summary>
+    WindowsScRgbPerceptual,
+    /// <summary>
+    /// Linear composition converted to PQ with client highlight fitting. Uses an FP16 surface, or
+    /// 10-bit when FP16 is unavailable.
+    /// </summary>
+    PqRelative,
+    /// <summary>
+    /// Linear composition converted to PQ with compositor perceptual mapping. Uses an FP16 surface,
+    /// or 10-bit when FP16 is unavailable.
+    /// </summary>
+    PqPerceptual
 }

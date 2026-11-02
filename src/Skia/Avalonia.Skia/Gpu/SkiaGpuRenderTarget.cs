@@ -28,8 +28,12 @@ namespace Avalonia.Skia
         public IDrawingContextImpl CreateDrawingContext(IRenderTarget.RenderTargetSceneInfo sceneInfo,
             out RenderTargetDrawingContextProperties properties)
         {
-            properties = default;
             var session = _renderTarget.BeginRenderingSession(sceneInfo);
+
+            properties = new RenderTargetDrawingContextProperties
+            {
+                PreferredColorVolume = session.PreferredColorVolume
+            };
 
             var nfo = new DrawingContextImpl.CreateInfo
             {
@@ -38,6 +42,8 @@ namespace Avalonia.Skia
                 Dpi = SkiaPlatform.DefaultDpi * session.ScaleFactor,
                 ScaleDrawingToDpi = false,
                 Gpu = _skiaGpu,
+                ColorFormat = session.ColorFormat,
+                PreferredColorVolume = session.PreferredColorVolume,
                 CurrentSession =  session
             };
 
@@ -45,8 +51,6 @@ namespace Avalonia.Skia
         }
         
         public PlatformRenderTargetState PlatformRenderTargetState => _renderTarget.State;
-        public RenderTargetProperties Properties { get; }
-
-
+        public RenderTargetProperties Properties => new() { ColorFormat = _renderTarget.ColorFormat };
     }
 }

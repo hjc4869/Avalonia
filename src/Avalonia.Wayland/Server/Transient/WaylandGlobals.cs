@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using Avalonia.Logging;
+using Avalonia.OpenGL.Egl;
 using Avalonia.Platform;
 using Avalonia.Wayland.Screens;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Transient.Rendering;
 using NWayland;
 using NWayland.Interop;
+using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.LinuxDmabufV1;
 using NWayland.Protocols.TextInputUnstableV3;
@@ -50,6 +53,13 @@ class WaylandGlobals
     /// </summary>
     public ZxdgDecorationManagerV1? XdgDecorationManager { get; }
     public string? AppId { get; }
+
+    /// <summary>
+    /// Bound when the compositor advertises <c>wp_color_manager_v1</c> and the app prefers an advanced
+    /// color presentation via <see cref="WaylandPlatformOptions.ColorPresentationPreferences"/>.
+    /// <c>null</c> means surfaces are left untagged and therefore treated as plain sRGB by the compositor.
+    /// </summary>
+    public WaylandColorManager? ColorManager { get; }
 
     public bool HasFractionalScaling => FractionalScaleManager != null && Viewporter != null;
 
@@ -175,16 +185,85 @@ class WaylandGlobals
         // quirks. Opt in to the dmabuf path (we own the allocator) by setting
         // UseDmabufSwapchain = true.
         var useDmabuf = platformOptions.UseDmabufSwapchain ?? false;
+
+        var preferences = platformOptions.ColorPresentationPreferences ?? [];
+        var advancedColor = preferences.Count > 0 && preferences[0] != WaylandColorPresentationMode.Sdr;
+        if (advancedColor && _knownGlobals.TryGetValue(WpColorManagerV1.ProxyType.Interface.Name, out var colorManagerGlobal))
+        {
+            ColorManager = WaylandColorManager.TryCreate(connection, Registry, colorManagerGlobal.name,
+                colorManagerGlobal.version);
+        }
+
         WaylandPlatformGraphics.IWaylandGraphics? gpu = null;
         if (useDmabuf && LinuxDmabuf != null)
+        {
             gpu = WaylandEglDmaBufPlatformGraphics.TryCreate(connection, this, platformOptions.GlProfiles);
+        }
         else
-            gpu = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles);
+        {
+            if (ColorManager is { } manager)
+            {
+                foreach (var candidate in preferences)
+                {
+                    if (candidate == WaylandColorPresentationMode.Sdr)
+                        break;
+                    if (!manager.TrySelectPresentation(candidate, out var desired))
+                    {
+                        Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this,
+                            "Color presentation {0} is not supported by the compositor", candidate);
+                        continue;
+                    }
+                    var graphics = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles,
+                        BuildColorBufferFormats(desired));
+                    if (graphics?.ColorFormat.ColorSpace == desired && manager.TryCreateImageDescription(desired))
+                    {
+                        gpu = graphics;
+                        Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this,
+                            "Selected color presentation {0}, native format {1}", candidate, graphics.ColorFormat);
+                        break;
+                    }
+                    graphics?.Dispose();
+                    manager.DestroyImageDescription();
+                    Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this,
+                        "Color presentation {0} failed format or image-description negotiation", candidate);
+                }
+            }
+
+            if (gpu is null)
+            {
+                ColorManager?.DestroyImageDescription();
+                gpu = WaylandEglWsiPlatformGraphics.TryCreate(connection, platformOptions.GlProfiles,
+                    EglColorBufferFormat.StandardOnly);
+                if (advancedColor)
+                    Logger.TryGet(LogEventLevel.Information, "Wayland")?.Log(this, "Selected SDR presentation fallback");
+            }
+        }
 
         worker.PlatformGraphics.Initialize(gpu);
 
         // TODO: sanity checks
     }
+
+    // FP16 comes first for every advanced color surface: 10-bit configs carry only two alpha bits,
+    // which erase drawn shadows and antialiased edges. The trailing standard config makes an
+    // unavailable format fail the color space check rather than EGL display creation.
+    private static IReadOnlyList<EglColorBufferFormat> BuildColorBufferFormats(PlatformColorSpace colorSpace) =>
+        colorSpace switch
+        {
+            // 10-bit is PQ's native HDR precision, so it remains the fallback when FP16 is unavailable.
+            PlatformColorSpace.Rec2020Pq =>
+            [
+                EglColorBufferFormat.Float16(colorSpace),
+                EglColorBufferFormat.Rgb10A2(colorSpace),
+                EglColorBufferFormat.Standard
+            ],
+            // scRGB needs a float encoding. Wide gamut is FP16-only because 8-bit wide gamut bands sRGB content.
+            _ =>
+            [
+                EglColorBufferFormat.Float16(colorSpace),
+                EglColorBufferFormat.Standard
+            ]
+        };
 
     public WaylandConnection Connection { get; }
     public WaylandWorker Worker { get; }
@@ -194,6 +273,7 @@ class WaylandGlobals
     public void Dispose()
     {
         InputDispatcher.Dispose();
+        ColorManager?.Dispose();
         Worker.PlatformGraphics.Reset();
     }
 }

@@ -48,6 +48,18 @@ namespace Avalonia
         /// </summary>
         Metal = 3
     }
+
+    /// <summary>The requested color policy for macOS rendering surfaces.</summary>
+    public enum AvaloniaNativeColorMode
+    {
+        /// <summary>Color-managed, 8-bit sRGB output.</summary>
+        Standard,
+        /// <summary>
+        /// Extended-linear sRGB on Metal, supporting wide gamut and HDR in the same FP16 surface.
+        /// Other rendering modes fall back to color-managed sRGB.
+        /// </summary>
+        ExtendedLinear
+    }
     
     /// <summary>
     /// OSX backend options.
@@ -57,7 +69,7 @@ namespace Avalonia
         /// <summary>
         /// Gets or sets Avalonia rendering modes with fallbacks.
         /// The first element in the array has the highest priority.
-        /// The default value is: <see cref="AvaloniaNativeRenderingMode.OpenGl"/>, <see cref="AvaloniaNativeRenderingMode.Software"/>.
+        /// The default order is Metal, OpenGL, then software.
         /// </summary>
         /// <remarks>
         /// If application should work on as wide range of devices as possible,
@@ -70,6 +82,13 @@ namespace Avalonia
             AvaloniaNativeRenderingMode.OpenGl,
             AvaloniaNativeRenderingMode.Software
         };
+
+        /// <summary>
+        /// Gets or sets the requested surface color policy. The default is color-managed sRGB.
+        /// Extended-linear output requires Metal on macOS 10.15 or later. Use
+        /// <see cref="Avalonia.Platform.IPlatformHdrContentFeature"/> to declare visible HDR content.
+        /// </summary>
+        public AvaloniaNativeColorMode ColorMode { get; set; } = AvaloniaNativeColorMode.Standard;
 
         /// <summary>
         /// Embeds popups to the window when set to true. The default value is false.
