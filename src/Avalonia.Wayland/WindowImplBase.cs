@@ -25,7 +25,7 @@ namespace Avalonia.Wayland;
 /// callbacks and no-op platform methods that Wayland doesn't support
 /// (Move, SetTopmost, Activate, PointToClient/Screen, etc.).
 /// </summary>
-internal abstract partial class WindowBaseImpl : IWindowBaseImpl
+internal abstract partial class WindowBaseImpl : IWindowBaseImpl, IPlatformSurfaceColorVolumeFeature, IPlatformHdrContentFeature, IPlatformHdrOutputFeature
 {
     protected WaylandWorkerClient Client { get; }
     protected IInputRoot? InputRoot { get; private set; }
@@ -36,6 +36,9 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl
     protected WaylandCursorImpl? CurrentCursor { get; private set; }
     protected bool IsEnabled  { get; set; } = true;
     protected bool IsDisposed  { get; private set; }
+    private bool _hasHdrContent;
+    private PlatformHdrContentMetadata? _hdrContentMetadata;
+    private IPlatformHdrOutputMetadataProvider? _hdrOutputProvider;
     
     internal IReadOnlyList<object> CurrentOutputIds { get; set; } = Array.Empty<object>();
 
@@ -172,6 +175,46 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl
     protected void PostToUiThread(Action action) =>
         Dispatcher.UIThread.Post(action, DispatcherPriority.Input);
 
+    public PlatformSurfaceColorVolume? PreferredColorVolume { get; private set; }
+
+    public event EventHandler? PreferredColorVolumeChanged;
+
+    public void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        metadata = PlatformHdrContentMetadata.Normalize(hasHdrContent, metadata);
+        if (IsDisposed || _hasHdrContent == hasHdrContent && _hdrContentMetadata == metadata)
+            return;
+        _hasHdrContent = hasHdrContent;
+        _hdrContentMetadata = metadata;
+        ApplyHdrContent(SurfaceProxy);
+    }
+
+    public void SetHdrOutput(IPlatformHdrOutputMetadataProvider? provider)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        if (IsDisposed || Equals(_hdrOutputProvider, provider))
+            return;
+        _hdrOutputProvider = provider;
+        SurfaceProxy?.SetHdrOutput(provider);
+    }
+
+    internal void ApplyHdrContent(WXdgShellSurfaceProxy? proxy)
+    {
+        proxy?.SetHdrContent(_hasHdrContent, _hdrContentMetadata);
+        proxy?.SetHdrOutput(_hdrOutputProvider);
+    }
+
+    private void UpdatePreferredColorVolume(PlatformSurfaceColorVolume? colorVolume)
+    {
+        if (PreferredColorVolume == colorVolume)
+            return;
+        PreferredColorVolume = colorVolume;
+        PreferredColorVolumeChanged?.Invoke(this, EventArgs.Empty);
+        // The frame currently on screen was rendered against the old luminances.
+        Paint?.Invoke(new Rect(ClientSize));
+    }
+
     public virtual object? TryGetFeature(Type featureType)
     {
         if (featureType == typeof(IScreenImpl))
@@ -180,6 +223,12 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl
             return AvaloniaLocator.Current.GetRequiredService<IClipboard>();
         if (featureType == typeof(ILauncher))
             return new BclLauncher();
+        if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            return this;
+        if (featureType == typeof(IPlatformHdrContentFeature))
+            return this;
+        if (featureType == typeof(IPlatformHdrOutputFeature))
+            return this;
         return null;
     }
 
@@ -279,6 +328,13 @@ internal abstract partial class WindowBaseImpl : IWindowBaseImpl
             if (IsDisposed)
                 return;
             Parent.CurrentOutputIds = outputIds;
+        }
+
+        public virtual void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? colorVolume)
+        {
+            if (IsDisposed)
+                return;
+            Parent.UpdatePreferredColorVolume(colorVolume);
         }
     }
 }

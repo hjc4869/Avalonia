@@ -9,6 +9,7 @@ using Avalonia.Platform.Surfaces;
 using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Transient;
 using Avalonia.Wayland.Server.Transient.Rendering;
+using NWayland.Protocols.ColorManagementV1;
 using NWayland.Protocols.FractionalScaleV1;
 using NWayland.Protocols.Viewporter;
 using NWayland.Protocols.Wayland;
@@ -25,6 +26,14 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     public WlSurface? WlSurface { get; private set; }
     protected WpFractionalScaleV1? FractionalScale { get; private set; }
     protected WpViewport? Viewport { get; private set; }
+    private WpColorManagementSurfaceV1? _colorSurface;
+    private WaylandColorVolumeFeedback? _colorVolumeFeedback;
+    private bool _hasHdrContent;
+    private PlatformHdrContentMetadata? _hdrContentMetadata;
+    private WpImageDescriptionV1? _contentImageDescription;
+    private IPlatformHdrOutputMetadataProvider? _hdrOutputProvider;
+    private (uint Minimum, uint Maximum, uint? MaxCll)? _appliedHdrLuminances;
+    private bool? _appliedHdrContent;
     protected int? LastPreferredBufferScale { get; private set; }
     protected double? PreferredFractionalScale { get; private set; }
     protected List<WaylandOutputsTracker.Output> Outputs  { get; } = new();
@@ -41,7 +50,6 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
     public WSurface(WaylandWorker worker)
     {
         Worker = worker;
-        worker.PostOob(() => worker.RegisterPersistentObject(this));
     }
 
     /// <summary>
@@ -116,6 +124,42 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
 
     public virtual void ResetTextInput() => TextInputV3?.Reset(this);
 
+    public void SetHdrContent(bool hasHdrContent, PlatformHdrContentMetadata? metadata)
+    {
+        metadata = PlatformHdrContentMetadata.Normalize(hasHdrContent, metadata);
+        if (_hasHdrContent == hasHdrContent && _hdrContentMetadata == metadata)
+            return;
+        _hasHdrContent = hasHdrContent;
+        _hdrContentMetadata = metadata;
+        Worker.WakeupRenderLoop();
+    }
+
+    public void SetHdrOutput(IPlatformHdrOutputMetadataProvider? provider)
+    {
+        _hdrOutputProvider = provider;
+        Worker.WakeupRenderLoop();
+    }
+
+    internal void ApplyHdrOutput(PlatformSurfaceColorVolume? colorVolume)
+    {
+        if (_colorSurface is null || Globals?.ColorManager is not { } manager)
+            return;
+        var metadata = _hdrOutputProvider is { } provider
+            ? provider.GetOutputMetadata(colorVolume) : _hdrContentMetadata;
+        metadata = PlatformHdrContentMetadata.Normalize(_hasHdrContent, metadata);
+        // Compare the resulting luminances rather than their inputs: an EDR backlight ramp changes
+        // the feedback snapshot every frame without changing how the surface should be described.
+        var luminances = manager.GetEffectiveLuminances(_hasHdrContent, metadata, colorVolume);
+        if (_appliedHdrContent == _hasHdrContent && _appliedHdrLuminances == luminances)
+            return;
+        var previous = _contentImageDescription;
+        _contentImageDescription = manager.SetHdrContent(_colorSurface, _hasHdrContent, luminances);
+        _appliedHdrContent = _hasHdrContent;
+        _appliedHdrLuminances = luminances;
+        previous?.Destroy();
+        previous?.Dispose();
+    }
+
     public void SetHitTestVisible(bool value)
     {
         if (_hitTestVisible == value)
@@ -188,10 +232,41 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             Viewport = globals.Viewporter!.GetViewport(WlSurface);
         }
 
-        // Re-apply the cached input region on (re)connect. It's double-buffered
-        // state, promoted by the next commit — which happens before the surface
-        // can receive any input.
-        ApplyInputRegion();
+        _colorSurface = globals.ColorManager?.TryAttach(WlSurface);
+        _appliedHdrContent = null;
+        _appliedHdrLuminances = null;
+        if (_colorSurface is not null)
+        {
+            _colorVolumeFeedback = globals.ColorManager?.TryTrackColorVolume(WlSurface, SetPreferredColorVolume);
+        }
+
+    // Re-apply the cached input region on (re)connect. It's double-buffered
+    // state, promoted by the next commit — which happens before the surface
+    // can receive any input.
+    ApplyInputRegion();
+    }
+
+    /// <summary>
+    /// The color volume the compositor currently prefers for this surface, or <c>null</c> when it
+    /// can't be determined. Read on the Wayland thread when a render session begins.
+    /// </summary>
+    internal PlatformSurfaceColorVolume? PreferredColorVolume { get; private set; }
+
+    private void SetPreferredColorVolume(PlatformSurfaceColorVolume? volume)
+    {
+        if (PreferredColorVolume == volume)
+            return;
+        PreferredColorVolume = volume;
+        // The next frame has to be rendered against the new luminances.
+        Worker.WakeupRenderLoop();
+        OnPreferredColorVolumeChanged(volume);
+    }
+
+    /// <summary>
+    /// Called on the Wayland thread when the preferred color volume changes.
+    /// </summary>
+    protected virtual void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume)
+    {
     }
 
     private IPlatformRenderSurface[]? _renderSurfaces;
@@ -379,6 +454,22 @@ class WSurface : IPersistentWaylandObject, IWSurface, IWaylandFramebufferSurface
             FractionalScale.Dispose();
             FractionalScale = null;
         }
+        // color-management-v1 has the same ordering requirement.
+        if (_colorVolumeFeedback != null)
+        {
+            _colorVolumeFeedback.Dispose();
+            _colorVolumeFeedback = null;
+        }
+        SetPreferredColorVolume(null);
+        if (_colorSurface != null)
+        {
+            _colorSurface.Destroy();
+            _colorSurface.Dispose();
+            _colorSurface = null;
+        }
+        _contentImageDescription?.Destroy();
+        _contentImageDescription?.Dispose();
+        _contentImageDescription = null;
         WlSurface?.Destroy();
         WlSurface = null;
         Globals = null;
@@ -451,6 +542,9 @@ class WXdgShellSurface : WSurface, IWXdgShellSurface
     }
 
     protected override void OnScaleChanged(double scale) => EventSink.OnScaleChanged(scale);
+
+    protected override void OnPreferredColorVolumeChanged(PlatformSurfaceColorVolume? volume) =>
+        EventSink.OnPreferredColorVolumeChanged(volume);
 
     protected override void OnOutputsChanged()
     {

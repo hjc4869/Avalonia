@@ -88,6 +88,7 @@ class WaylandWorkerClient
     public WaylandSurfaceCreateResult<WXdgTopLevelProxy> CreateTopLevelHandle(WXdgTopLevelEventSinkProxy sink)
     {
         var topLevel = new WXdgTopLevel(_worker, sink);
+        Register(topLevel);
         var proxy = new WXdgTopLevelProxy(topLevel, Marshaller);
         return new WaylandSurfaceCreateResult<WXdgTopLevelProxy>(
             Proxy: proxy,
@@ -109,6 +110,7 @@ class WaylandWorkerClient
         WXdgShellSurfaceProxy parent)
     {
         var popup = new WXdgPopup(_worker, sink, (WXdgShellSurface)parent.ProxyTarget);
+        Register(popup);
         var proxy = new WXdgPopupProxy(popup, Marshaller);
         // Popups don't currently surface a "basic init" task to the UI
         // side: the UI driver waits on the first OnPopupConfigure delivered
@@ -120,4 +122,7 @@ class WaylandWorkerClient
             GetRenderSurfaces: () => popup.RenderSurfaces,
             BasicInitCompleted: Task.FromResult(new XdgConfigureBatch()));
     }
+
+    // OnConnected can call derived members synchronously, so only fully constructed surfaces are registered.
+    private void Register(WSurface surface) => _worker.PostOob(() => _worker.RegisterPersistentObject(surface));
 }

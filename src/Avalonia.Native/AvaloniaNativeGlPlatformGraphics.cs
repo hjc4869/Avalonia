@@ -222,6 +222,9 @@ namespace Avalonia.Native
         public double Scaling => Session.Scaling;
 
         public bool IsYFlipped => true;
+        public PlatformSurfaceColorFormat ColorFormat =>
+            new(PlatformPixelEncoding.Default, PlatformColorSpace.Srgb);
+        public PlatformSurfaceColorVolume? PreferredColorVolume => MacOSColorVolume.FromNative(default);
         
         public void Dispose()
         {
@@ -237,6 +240,9 @@ namespace Avalonia.Native
         {
             _topLevel = topLevel;
         }
+
+        public PlatformSurfaceColorFormat ColorFormat =>
+            new(PlatformPixelEncoding.Default, PlatformColorSpace.Srgb);
         
         public IGlPlatformSurfaceRenderTarget CreateGlRenderTarget(IGlContext context)
         {

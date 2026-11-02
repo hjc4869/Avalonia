@@ -522,7 +522,7 @@ namespace Avalonia.OpenGL
 //        public const int GL_RGBA4 = 0x8056;
 //        public const int GL_RGB5_A1 = 0x8057;
         public const int GL_RGBA8 = 0x8058;
-//        public const int GL_RGB10_A2 = 0x8059;
+        public const int GL_RGB10_A2 = 0x8059;
 //        public const int GL_RGBA12 = 0x805A;
 //        public const int GL_RGBA16 = 0x805B;
 //        public const int GL_CLIENT_PIXEL_STORE_BIT = 0x00000001;
@@ -546,7 +546,7 @@ namespace Avalonia.OpenGL
 //        public const int GL_UNSIGNED_INT_8_8_8_8 = 0x8035;
         public const int GL_UNSIGNED_INT_8_8_8_8_REV = 0x8367;
 //        public const int GL_UNSIGNED_INT_10_10_10_2 = 0x8036;
-//        public const int GL_UNSIGNED_INT_2_10_10_10_REV = 0x8368;
+        public const int GL_UNSIGNED_INT_2_10_10_10_REV = 0x8368;
 //        public const int GL_LIGHT_MODEL_COLOR_CONTROL = 0x81F8;
 //        public const int GL_SINGLE_COLOR = 0x81F9;
 //        public const int GL_SEPARATE_SPECULAR_COLOR = 0x81FA;
@@ -1002,7 +1002,7 @@ namespace Avalonia.OpenGL
 //        public const int GL_CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT = 0x00000001;
 //        public const int GL_RGBA32F = 0x8814;
 //        public const int GL_RGB32F = 0x8815;
-//        public const int GL_RGBA16F = 0x881A;
+        public const int GL_RGBA16F = 0x881A;
 //        public const int GL_RGB16F = 0x881B;
 //        public const int GL_VERTEX_ATTRIB_ARRAY_INTEGER = 0x88FD;
 //        public const int GL_MAX_ARRAY_TEXTURE_LAYERS = 0x88FF;
@@ -1182,7 +1182,7 @@ namespace Avalonia.OpenGL
 //        public const int GL_TEXTURE_LUMINANCE_TYPE = 0x8C14;
 //        public const int GL_TEXTURE_INTENSITY_TYPE = 0x8C15;
 //        public const int GL_FRAMEBUFFER_SRGB = 0x8DB9;
-//        public const int GL_HALF_FLOAT = 0x140B;
+        public const int GL_HALF_FLOAT = 0x140B;
 //        public const int GL_MAP_READ_BIT = 0x0001;
 //        public const int GL_MAP_WRITE_BIT = 0x0002;
 //        public const int GL_MAP_INVALIDATE_RANGE_BIT = 0x0004;

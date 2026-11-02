@@ -22,7 +22,7 @@ using Avalonia.Rendering.Composition;
 
 namespace Avalonia.Browser
 {
-    internal class BrowserTopLevelImpl : ITopLevelImpl
+    internal class BrowserTopLevelImpl : ITopLevelImpl, IPlatformSurfaceColorVolumeFeature
     {
         private static int s_lastTopLevelId = 0;
         private static Dictionary<int, WeakReference<BrowserTopLevelImpl>> s_topLevels = new();
@@ -33,9 +33,16 @@ namespace Avalonia.Browser
         private readonly IInsetsManager _insetsManager;
         private readonly JSObject _container;
         private readonly BrowserInputHandler _inputHandler;
+        private IInputRoot? _inputRoot;
         private string _currentCursor = CssCursor.Default;
         private BrowserSurface? _surface;
         private readonly int _topLevelId;
+        private readonly BrowserScreens? _screens;
+        private bool _isHdr;
+        private PlatformSurfaceColorVolume? _preferredColorVolume;
+
+        public PlatformSurfaceColorVolume? PreferredColorVolume => _preferredColorVolume;
+        public event EventHandler? PreferredColorVolumeChanged;
 
         static BrowserTopLevelImpl()
         {
@@ -66,13 +73,32 @@ namespace Avalonia.Browser
             _container = container;
 
             var opts = AvaloniaLocator.Current.GetService<BrowserPlatformOptions>() ?? new BrowserPlatformOptions();
-            _surface = RenderTargetBrowserSurface.Create(container, opts.RenderingMode, _topLevelId);
+            _screens = AvaloniaLocator.Current.GetService<IScreenImpl>() as BrowserScreens;
+            if (_screens is not null)
+                _screens.PreferredColorVolumeChanged += OnColorVolumeChanged;
+            _surface = RenderTargetBrowserSurface.Create(container, opts.RenderingMode, _topLevelId, isHdr =>
+            {
+                if (_surface is null || _isHdr == isHdr)
+                    return;
+                _isHdr = isHdr;
+                OnColorVolumeChanged(this, EventArgs.Empty);
+            });
 
             _surface.SizeChanged += OnSizeChanged;
             _surface.ScalingChanged += OnScalingChanged;
             Compositor = _surface.Compositor;
 
             Handle = new JSObjectControlHandle(container);
+        }
+
+        private void OnColorVolumeChanged(object? sender, EventArgs args)
+        {
+            var volume = _isHdr ? _screens?.PreferredColorVolume : null;
+            if (_preferredColorVolume == volume)
+                return;
+            _preferredColorVolume = volume;
+            PreferredColorVolumeChanged?.Invoke(this, EventArgs.Empty);
+            _inputRoot?.RootElement.CompositionVisual?.Root?.RequestRedraw();
         }
 
         private void OnScalingChanged()
@@ -94,6 +120,8 @@ namespace Avalonia.Browser
 
         public void Dispose()
         {
+            if (_screens is not null)
+                _screens.PreferredColorVolumeChanged -= OnColorVolumeChanged;
             _surface?.Dispose();
             _surface = null;
         }
@@ -102,7 +130,11 @@ namespace Avalonia.Browser
         public BrowserSurface? Surface => _surface;
         public BrowserInputHandler InputHandler => _inputHandler;
 
-        public void SetInputRoot(IInputRoot inputRoot) => _inputHandler.SetInputRoot(inputRoot);
+        public void SetInputRoot(IInputRoot inputRoot)
+        {
+            _inputRoot = inputRoot;
+            _inputHandler.SetInputRoot(inputRoot);
+        }
 
         public Point PointToClient(PixelPoint point) => new(point.X, point.Y);
 
@@ -170,6 +202,11 @@ namespace Avalonia.Browser
             if (featureType == typeof(IScreenImpl))
             {
                 return AvaloniaLocator.Current.GetService<IScreenImpl>();
+            }
+
+            if (featureType == typeof(IPlatformSurfaceColorVolumeFeature))
+            {
+                return this;
             }
 
             if (featureType == typeof(INativeControlHostImpl))

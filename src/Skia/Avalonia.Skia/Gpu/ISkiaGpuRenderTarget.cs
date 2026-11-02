@@ -16,5 +16,10 @@ namespace Avalonia.Skia
         ISkiaGpuRenderSession BeginRenderingSession(IRenderTarget.RenderTargetSceneInfo sceneInfo);
         
         PlatformRenderTargetState State => PlatformRenderTargetState.Ready;
+
+        /// <summary>
+        /// The pixel encoding and color space sessions created from this target render into.
+        /// </summary>
+        PlatformSurfaceColorFormat ColorFormat => default;
     }
 }
