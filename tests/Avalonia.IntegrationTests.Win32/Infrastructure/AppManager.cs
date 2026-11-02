@@ -40,6 +40,9 @@ internal static class AppManager
             Name = "UI Thread"
         };
 
+        // Match a desktop application's STAThread entry point. WinRT UI APIs such as
+        // InputPane cannot be activated from an MTA.
+        uiThread.SetApartmentState(ApartmentState.STA);
         uiThread.Start();
 
         return tcs.Task;
