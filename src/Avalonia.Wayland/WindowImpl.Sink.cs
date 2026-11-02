@@ -2,6 +2,7 @@ using System;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
+using Avalonia.Platform;
 using Avalonia.Wayland.Server;
 using Avalonia.Wayland.Server.Persistent;
 using NWayland.Protocols.XdgShell;
@@ -16,6 +17,10 @@ partial class WindowImpl
         private XdgConfigureBatch? _initialBatch;
         private WaylandSurfaceCreateResult<WXdgTopLevelProxy>? _handle;
         private WXdgTopLevelProxy? _surfaceProxy;
+        private bool _titleBarPressArmed;
+        private PointerType _titleBarPressPointerType;
+        private ulong _titleBarPressTime;
+        private Rect _titleBarPressArea;
 
         public Sink(WindowImpl parent, bool secondShow) : base(parent)
         {
@@ -51,6 +56,19 @@ partial class WindowImpl
             // Re-send cached app id to the new surface
             if (Parent._appId != null)
                 _surfaceProxy.SetAppId(Parent._appId);
+
+            // The icon lives on the xdg_toplevel, so it has to be republished against the new one.
+            if (Parent._icon != null)
+                _surfaceProxy.SetIcon(Parent._icon);
+
+            // org_kde_kwin_appmenu is per-surface, so the exported menu's address has to be
+            // re-published against the fresh surface.
+            if (Parent._appmenuAddress is { } appmenu)
+                _surfaceProxy.SetAppmenuAddress(appmenu.ServiceName, appmenu.ObjectPath);
+
+            // Same story for org_kde_kwin_server_decoration_palette.
+            if (Parent._decorationPalette is { } palette)
+                _surfaceProxy.SetDecorationPalette(palette);
 
             // Re-apply cached min/max size constraints after a fresh worker
             // surface is created. null on both sides means SetMinMaxSize was
@@ -138,9 +156,13 @@ partial class WindowImpl
             var chromeRole = InputRoot.HitTestChromeElement(mouse.Position);
             if (chromeRole == WindowDecorationsElementRole.TitleBar)
             {
-                _surfaceProxy?.Move(mouse.PlatformInputEventCookie, WaylandDispatchPriority.Oob);
+                // Client-side title bars own the double-click action that server-side decorations provide.
+                if (!IsTitleBarDoublePress(mouse) || !Parent.ToggleMaximizedFromTitleBar())
+                    _surfaceProxy?.Move(mouse.PlatformInputEventCookie, WaylandDispatchPriority.Oob);
                 return true;
             }
+
+            _titleBarPressArmed = false;
 
             if (Parent._canResize && chromeRole is { } role)
             {
@@ -165,6 +187,24 @@ partial class WindowImpl
             }
 
             return false;
+        }
+
+        private bool IsTitleBarDoublePress(RawPointerEventArgs args)
+        {
+            var pointerType = args.Type == RawPointerEventType.TouchBegin ? PointerType.Touch : PointerType.Mouse;
+            var settings = AvaloniaLocator.Current.GetService<IPlatformSettings>();
+            var time = settings?.GetDoubleTapTime(pointerType).TotalMilliseconds ?? 500;
+            var size = settings?.GetDoubleTapSize(pointerType) ?? new Size(4, 4);
+            var isDouble = _titleBarPressArmed && _titleBarPressPointerType == pointerType &&
+                _titleBarPressArea.Contains(args.Position) &&
+                args.Timestamp >= _titleBarPressTime && args.Timestamp - _titleBarPressTime <= time;
+
+            _titleBarPressArmed = !isDouble;
+            _titleBarPressPointerType = pointerType;
+            _titleBarPressTime = args.Timestamp;
+            _titleBarPressArea = new Rect(args.Position, new Size())
+                .Inflate(new Thickness(size.Width / 2, size.Height / 2));
+            return isDouble;
         }
     }
 }

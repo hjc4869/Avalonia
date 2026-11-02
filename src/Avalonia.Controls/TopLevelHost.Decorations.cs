@@ -192,12 +192,21 @@ internal partial class TopLevelHost
 
         var frame = _decorations.FrameThickness;
         var shadow = _decorations.ShadowThickness;
-        // Grips strictly cover frame + shadow area, never client area
+        var gripShadow = new Thickness(
+            Math.Min(shadow.Left, ResizeGripLayer.MaxShadowGripThickness),
+            Math.Min(shadow.Top, ResizeGripLayer.MaxShadowGripThickness),
+            Math.Min(shadow.Right, ResizeGripLayer.MaxShadowGripThickness),
+            Math.Min(shadow.Bottom, ResizeGripLayer.MaxShadowGripThickness));
+        _resizeGrips.Margin = new Thickness(
+            shadow.Left - gripShadow.Left,
+            shadow.Top - gripShadow.Top,
+            shadow.Right - gripShadow.Right,
+            shadow.Bottom - gripShadow.Bottom);
         _resizeGrips.GripThickness = new Thickness(
-            frame.Left + shadow.Left,
-            frame.Top + shadow.Top,
-            frame.Right + shadow.Right,
-            frame.Bottom + shadow.Bottom);
+            frame.Left + gripShadow.Left,
+            frame.Top + gripShadow.Top,
+            frame.Right + gripShadow.Right,
+            frame.Bottom + gripShadow.Bottom);
     }
 
     internal void UpdateResizeGrips()

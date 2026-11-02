@@ -26,6 +26,7 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl, IWaylandOptions
     private Size _maxAutoSizeHint;
     private WindowState _windowState;
     private bool _canResize = true;
+    private bool _canMaximize = true;
     private Size _restoreBounds;
     private Thickness _shadowExtents;
     private Size? _minSize;
@@ -37,7 +38,12 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl, IWaylandOptions
     private bool _csdSticky;
     private string? _title;
     private string? _appId;
+    private WaylandIconData? _icon;
     private FallbackStorageProvider? _storageProvider;
+    private ITopLevelNativeMenuExporter? _nativeMenuExporter;
+    private bool _nativeMenuExporterQueried;
+    private (string ServiceName, string ObjectPath)? _appmenuAddress;
+    private string? _decorationPalette;
 
     public WindowImpl(WaylandWorkerClient client) : base(client)
     {
@@ -108,7 +114,38 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl, IWaylandOptions
             return _storageProvider ??= new FallbackStorageProvider(BuildStorageFactories());
         if (featureType == typeof(IWaylandOptionsToplevelImplFeature))
             return this;
+        if (featureType == typeof(ITopLevelNativeMenuExporter))
+            return GetNativeMenuExporter();
         return base.TryGetFeature(featureType);
+    }
+
+    /// <summary>
+    /// Wayland has no global menu protocol of its own, so the menu is exported over DBus and the
+    /// window is associated with it through KWin's <c>org_kde_kwin_appmenu</c>. When no shell picks
+    /// the menu up, nothing ever asks for the layout, the exporter stays unexported and the
+    /// framework falls back to an in-window menu.
+    /// </summary>
+    private ITopLevelNativeMenuExporter? GetNativeMenuExporter()
+    {
+        if (!_nativeMenuExporterQueried)
+        {
+            _nativeMenuExporterQueried = true;
+            _nativeMenuExporter = DBusMenuExporter.TryCreateTopLevelNativeMenu();
+            if (_nativeMenuExporter is IDBusMenuAddressProvider { ServiceName: { } serviceName } address)
+            {
+                _appmenuAddress = (serviceName, address.ObjectPath);
+                _surfaceProxy?.SetAppmenuAddress(serviceName, address.ObjectPath);
+            }
+        }
+
+        return _nativeMenuExporter;
+    }
+
+    public override void Dispose()
+    {
+        (_nativeMenuExporter as IDisposable)?.Dispose();
+        _nativeMenuExporter = null;
+        base.Dispose();
     }
 
     private Func<Task<IStorageProvider?>>[] BuildStorageFactories() => new Func<Task<IStorageProvider?>>[]
@@ -241,6 +278,18 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl, IWaylandOptions
         _surfaceProxy?.SetAppId(appId);
     }
 
+    /// <summary>
+    /// Server-side decorations are painted by the compositor, so a light/dark app on a
+    /// dark/light desktop can only match its title bar by telling KWin which colour scheme to
+    /// use. Compositors without the KDE palette protocol simply keep their own colours.
+    /// </summary>
+    public override void SetFrameThemeVariant(PlatformThemeVariant? themeVariant)
+    {
+        base.SetFrameThemeVariant(themeVariant);
+        _decorationPalette = KdeDecorationPalette.For(themeVariant);
+        _surfaceProxy?.SetDecorationPalette(_decorationPalette);
+    }
+
     public void SetParent(IWindowImpl? parent)
     {
         var parentProxy = (parent as WindowImpl)?._handle?.Proxy;
@@ -281,11 +330,31 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl, IWaylandOptions
         ExtendClientAreaToDecorationsChanged?.Invoke(IsClientAreaExtendedToDecorations);
     }
 
-    public void SetIcon(IWindowIconImpl? icon) { }
+    public void SetIcon(IWindowIconImpl? icon)
+    {
+        _icon = WaylandIconData.TryCreate(icon);
+        _surfaceProxy?.SetIcon(_icon);
+    }
     public void ShowTaskbarIcon(bool value) { }
     public void CanResize(bool value) => _canResize = value;
     public void SetCanMinimize(bool value) { }
-    public void SetCanMaximize(bool value) { }
+    public void SetCanMaximize(bool value) => _canMaximize = value;
+
+    // Returns false when the window cannot change between its normal and maximized states.
+    private bool ToggleMaximizedFromTitleBar()
+    {
+        switch (_windowState)
+        {
+            case WindowState.Maximized when _canResize:
+                WindowState = WindowState.Normal;
+                return true;
+            case WindowState.Normal when _canMaximize:
+                WindowState = WindowState.Maximized;
+                return true;
+            default:
+                return false;
+        }
+    }
 
     public Func<WindowCloseReason, bool>? Closing { get; set; }
 
@@ -384,8 +453,12 @@ internal partial class WindowImpl : WindowBaseImpl, IWindowImpl, IWaylandOptions
                 && !double.IsPositiveInfinity(s.Height)
                 ? s
                 : (Size?)null;
-        _minSize = Normalize(minSize);
-        _maxSize = Normalize(maxSize);
+            var normalizedMinSize = Normalize(minSize);
+            var normalizedMaxSize = Normalize(maxSize);
+            if (_minSize == normalizedMinSize && _maxSize == normalizedMaxSize)
+                return;
+            _minSize = normalizedMinSize;
+            _maxSize = normalizedMaxSize;
         _surfaceProxy?.SetMinMaxSize(_minSize, _maxSize);
     }
 
