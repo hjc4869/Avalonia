@@ -26,9 +26,37 @@ env:
 
 jobs:
 
+  version:
+    name: Generate Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Generate Package Version
+        id: version
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("build/SharedVersion.props").getroot()
+          version = root.find("{*}PropertyGroup/{*}Version").text
+          major, minor, patch = map(int, version.split("."))
+          package_version = f"{major}.{minor}.{patch + 1}-custom.{os.environ['GITHUB_RUN_NUMBER']}"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"version={package_version}", file=output)
+          PY
+
   linux:
     name: Linux
+    needs: version
     runs-on: ubuntu-24.04
+    env:
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - &step-checkout
@@ -51,13 +79,15 @@ jobs:
         run: |
           dotnet --info
           printenv
-          ./build.sh --target CiLinux --configuration=Release
+          ./build.sh --target CiLinux --configuration Release --force-nuget-version "$PACKAGE_VERSION"
 
   macos:
     name: macOS
+    needs: version
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - *step-checkout
@@ -71,29 +101,35 @@ jobs:
         run: |
           dotnet --info
           printenv
-          ./build.sh --target CiMacOS --configuration Release
+          ./build.sh --target CiMacOS --configuration Release --force-nuget-version "$PACKAGE_VERSION"
 
       - name: Upload Native Library
         uses: actions/upload-artifact@v7
         with:
           name: native-macos
           path: artifacts/native/Release/
+          if-no-files-found: error
 
-      - name: Upload NuGet Packages
+      - name: Upload Package Files
         uses: actions/upload-artifact@v7
         with:
           name: nuget-macos
           path: artifacts/nuget
+          if-no-files-found: error
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v7
         with:
           name: sbom-macos
           path: artifacts/sbom
+          if-no-files-found: error
 
   windows:
     name: Windows
+    needs: version
     runs-on: windows-2025
+    env:
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - *step-checkout
@@ -104,84 +140,60 @@ jobs:
         run: dotnet workload install android ios tvos maccatalyst macos wasm-tools
 
       - name: Run Build
-        run: ./build.cmd --target CiWindows --configuration Release
+        run: |
+          ./build.cmd --target CiWindows --configuration Release --force-nuget-version "$env:PACKAGE_VERSION"
 
-      - name: Upload NuGet Packages
+      - name: Upload Package Files
         uses: actions/upload-artifact@v7
         with:
           name: nuget-windows
           path: artifacts/nuget
+          if-no-files-found: error
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v7
         with:
           name: sbom-windows
           path: artifacts/sbom
+          if-no-files-found: error
 
-  # Only release/x.y.z branches (with an optional prerelease suffix) are releasable, not release/x.y ones.
-  # Expressions have no regex support, so a small job classifies the branch instead.
-  branch-info:
-    name: Branch Info
+  publish-packages:
+    name: Publish Release
+    needs: [version, linux, windows, macos]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    outputs:
-      is-release: ${{ steps.classify.outputs.is-release }}
+    permissions:
+      contents: write
+    env:
+      PACKAGE_VERSION: ${{ needs.version.outputs.version }}
+
     steps:
-      - name: Classify Branch
-        id: classify
+      - name: Download Windows Package Files
+        uses: actions/download-artifact@v7
+        with:
+          name: nuget-windows
+          path: packages
+
+      - name: Download macOS Package Files
+        uses: actions/download-artifact@v7
+        with:
+          name: nuget-macos
+          path: nuget-macos
+
+      - name: Assemble Package Files
+        run: cp nuget-macos/Avalonia.Native.*nupkg packages/
+
+      - name: Create NuGet Archive
+        run: zip -j "Avalonia-NuGet-$PACKAGE_VERSION.zip" packages/*nupkg
+
+      - name: Create Release
         env:
-          REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "$REF" =~ ^refs/heads/release/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            is_release=true
-          else
-            is_release=false
-          fi
-          echo "Ref: $REF, is release: $is_release"
-          echo "is-release=$is_release" >> "$GITHUB_OUTPUT"
-
-  # Note: pull requests are published by publish-nuget-pr.yml instead, which runs once this workflow completes.
-
-  publish-nightly:
-    name: Publish Nightly NuGet Packages
-    needs: [linux, windows, macos, branch-info]
-    # Everything except pull requests, merge queue runs and release/x.y.z branches (release/x.y ones are nightlies too).
-    if: >-
-      github.event_name != 'pull_request'
-      && github.event_name != 'merge_group'
-      && needs.branch-info.outputs.is-release != 'true'
-      && vars.NIGHTLY_FEED_UPLOAD_URL != ''
-    runs-on: ubuntu-24.04
-
-    steps:
-      - &step-checkout-actions
-        name: Checkout Actions
-        uses: actions/checkout@v7
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - name: Publish NuGet Packages
-        uses: ./.github/actions/publish-nuget
-        with:
-          feed-url: ${{ vars.NIGHTLY_FEED_UPLOAD_URL }}
-          api-key: ${{ secrets.NIGHTLY_FEED_API_KEY }}
-
-  # Pushes to release/x.y.z build automatically, but publishing waits for a manual approval of the "release" environment.
-  publish-release:
-    name: Publish Release NuGet Packages
-    needs: [linux, windows, macos, branch-info]
-    if: >-
-      github.event_name != 'pull_request'
-      && github.event_name != 'merge_group'
-      && needs.branch-info.outputs.is-release == 'true'
-    runs-on: ubuntu-24.04
-    environment: release
-
-    steps:
-      - *step-checkout-actions
-
-      - name: Publish NuGet Packages
-        uses: ./.github/actions/publish-nuget
-        with:
-          feed-url: ${{ vars.RELEASE_MANAGER_UPLOAD_URL }}
-          api-key: ${{ secrets.RELEASE_MANAGER_API_KEY }}
+          gh release create "$PACKAGE_VERSION" "Avalonia-NuGet-$PACKAGE_VERSION.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$PACKAGE_VERSION" \
+            --notes "Custom build of commit $GITHUB_SHA." \
+            --prerelease \
+            --latest=false
