@@ -512,6 +512,11 @@ enum AvnRawMouseEventType
     Magnify,
     Rotate,
     Swipe,
+    TouchpadScroll,
+    TouchpadScrollBegan,
+    TouchpadScrollEnded,
+    TouchpadScrollCancelled,
+    TouchpadScrollInertia,
 }
 
 enum AvnRawKeyEventType
