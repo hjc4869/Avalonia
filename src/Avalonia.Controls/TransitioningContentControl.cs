@@ -115,7 +115,10 @@ public class TransitioningContentControl : ContentControl
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        UpdateContent(false);
+        if (_lastPresenter is null || _lastPresenter.Content != Content)
+        {
+            UpdateContent(false);
+        }
     }
 
     protected override bool RegisterContentPresenter(ContentPresenter presenter)
@@ -155,7 +158,8 @@ public class TransitioningContentControl : ContentControl
             return;
         }
 
-        var currentPresenter = _isFirstFull ? _presenter2 : Presenter;
+        var reusePresenter = !withTransition && (_lastPresenter == Presenter || _lastPresenter == _presenter2);
+        var currentPresenter = reusePresenter ? _lastPresenter! : _isFirstFull ? _presenter2 : Presenter;
         var fromContent = _lastPresenter?.Content;
         var toContent = Content;
 
@@ -170,7 +174,7 @@ public class TransitioningContentControl : ContentControl
         currentPresenter.IsVisible = true;
         _lastPresenter = currentPresenter;
 
-        _isFirstFull = !_isFirstFull;
+        _isFirstFull = currentPresenter == Presenter;
 
         if (PageTransition is not null && withTransition)
         {

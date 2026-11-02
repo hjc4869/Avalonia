@@ -14,6 +14,14 @@ public class AvaloniaMainActivity : AvaloniaActivity
         {
             initialContent ??= lifetime.MainViewFactory?.Invoke();
 
+            if (initialContent is not null &&
+                Avalonia.Application.Current?.TryGetFeature<IActivatableLifetime>()
+                    is AndroidActivatableLifetime { CurrentMainActivity: AvaloniaActivity previousActivity } &&
+                previousActivity != this && ReferenceEquals(previousActivity.Content, initialContent))
+            {
+                previousActivity.Content = null;
+            }
+
             _view = new AvaloniaView(this);
 
             Content = initialContent;

@@ -393,7 +393,7 @@ namespace Avalonia.Layout
 
         private bool Measure(Layoutable control)
         {
-            if (!control.IsVisible || !control.IsAttachedToVisualTree)
+            if (!control.IsVisible || control.GetLayoutRoot() != _owner)
                 return false;
 
             // Controls closest to the visual root need to be arranged first. We don't try to store
@@ -426,7 +426,7 @@ namespace Avalonia.Layout
 
         private ArrangeResult Arrange(Layoutable control)
         {
-            if (!control.IsVisible || !control.IsAttachedToVisualTree)
+            if (!control.IsVisible || control.GetLayoutRoot() != _owner)
                 return ArrangeResult.NotVisible;
 
             if (control.VisualParent is Layoutable parent)
@@ -480,7 +480,7 @@ namespace Avalonia.Layout
                     {
                         var l = listeners[i];
 
-                        if (!l.Listener.IsAttachedToVisualTree)
+                        if (l.Listener.GetLayoutRoot() != _owner)
                         {
                             continue;
                         }
