@@ -104,6 +104,12 @@ Then, build and manually install the corresponding native libraries using Xcode.
 ./build.sh CompileNative
 ```
 
+The macOS native build produces the universal dynamic library and static libraries
+for `osx-x64` and `osx-arm64` under `artifacts/native/<Configuration>/`. Static
+builds also produce a font initialization object for each architecture. These
+files are built from the same checkout as the managed bindings and included in
+the `Avalonia.Native` NuGet package; packing fails if static inputs are missing.
+
 ## Building Avalonia into a local NuGet cache
 
 See [Building Local NuGet Packages](nuget.md)
