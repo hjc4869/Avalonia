@@ -1,0 +1,40 @@
+<Project>
+  <PropertyGroup>
+    <EnableStaticAvalonia Condition="'$(EnableStaticAvalonia)' == ''">true</EnableStaticAvalonia>
+    <EnableStaticAvaloniaNative Condition="'$(EnableStaticAvaloniaNative)' == ''">true</EnableStaticAvaloniaNative>
+    <AvaloniaStaticNativeRoot Condition="'$(AvaloniaStaticNativeRoot)' == ''">$(MSBuildThisFileDirectory)../static/</AvaloniaStaticNativeRoot>
+    <_AvaloniaStaticNativeRids>;osx-x64;osx-arm64;</_AvaloniaStaticNativeRids>
+    <_AvaloniaStaticNativePlatform>$([System.String]::Copy('$(RuntimeIdentifier)').Split('-')[0])</_AvaloniaStaticNativePlatform>
+    <_AvaloniaStaticNativeActive Condition="'$(EnableStaticAvalonia)' == 'true' and '$(EnableStaticAvaloniaNative)' == 'true' and '$(PublishAot)' == 'true' and '$(_AvaloniaStaticNativePlatform)' == 'osx'">true</_AvaloniaStaticNativeActive>
+    <_AvaloniaStaticNativeSupported>$(_AvaloniaStaticNativeRids.Contains(';$(RuntimeIdentifier);'))</_AvaloniaStaticNativeSupported>
+    <_AvaloniaStaticNativeDirectory>$(AvaloniaStaticNativeRoot)$(RuntimeIdentifier)/</_AvaloniaStaticNativeDirectory>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_AvaloniaStaticNativeActive)' == 'true' and '$(_AvaloniaStaticNativeSupported)' == 'true'">
+    <DirectPInvoke Include="libAvaloniaNative;libAvaloniaNative.dylib;AvaloniaNative" />
+    <_AvaloniaStaticNativeArchive Include="$(_AvaloniaStaticNativeDirectory)macos_font_preinit.o;$(_AvaloniaStaticNativeDirectory)libAvaloniaNative.a" />
+    <NativeLibrary Include="@(_AvaloniaStaticNativeArchive)" />
+    <NativeSystemLibrary Include="c++" />
+    <LinkerArg Include="-ObjC;-framework AppKit;-framework Carbon;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOSurface;-framework Metal;-framework OpenGL;-framework QuartzCore;-framework UniformTypeIdentifiers" />
+  </ItemGroup>
+
+  <Target Name="ValidateAvaloniaStaticNative" BeforeTargets="PrepareForBuild;WriteIlcRspFileForCompilation;LinkNative" Condition="'$(_AvaloniaStaticNativeActive)' == 'true'">
+    <Error Condition="'$(_AvaloniaStaticNativeSupported)' != 'true'" Text="Avalonia.Native static linking does not support $(RuntimeIdentifier)." />
+    <Error Condition="!Exists('%(_AvaloniaStaticNativeArchive.Identity)')" Text="Missing Avalonia.Native static linking input: %(_AvaloniaStaticNativeArchive.Identity)" />
+  </Target>
+
+  <Target Name="AvaloniaStaticNativeFilterPublish" AfterTargets="ComputeFilesToPublish" Condition="'$(_AvaloniaStaticNativeActive)' == 'true' and '$(_AvaloniaStaticNativeSupported)' == 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Filename)' == 'libAvaloniaNative' and ('%(ResolvedFileToPublish.Extension)' == '.dll' or '%(ResolvedFileToPublish.Extension)' == '.so' or '%(ResolvedFileToPublish.Extension)' == '.dylib')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="AvaloniaStaticNativeAppleLinkMode" BeforeTargets="LinkNative" Condition="'$(_AvaloniaStaticNativeActive)' == 'true' and '$(_AvaloniaStaticNativeSupported)' == 'true'">
+    <PropertyGroup>
+      <StaticExecutable>false</StaticExecutable>
+    </PropertyGroup>
+    <ItemGroup>
+      <LinkerArg Remove="-static;-static-pie" />
+    </ItemGroup>
+  </Target>
+</Project>
