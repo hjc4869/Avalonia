@@ -390,9 +390,9 @@ partial class Build : NukeBuild
             ApiDiffHelper.MergePackageMarkdownDiffFiles(outputFolderPath, baselineDisplay, currentDisplay);
         });
 
+    // RunWin32IntegrationTests is left out: the fork's CI does not run the Win32 integration tests.
     Target RunTests => _ => _
         .DependsOn(RunCoreLibsTests)
-        .DependsOn(RunWin32IntegrationTests)
         .DependsOn(RunRenderTests)
         .DependsOn(RunToolsTests)
         .DependsOn(RunHtmlPreviewerTests)
