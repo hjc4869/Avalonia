@@ -5,6 +5,7 @@ using System.Threading;
 using System.Timers;
 using Avalonia.Logging;
 using Avalonia.Rendering;
+using Avalonia.Wayland.Server.Persistent;
 
 namespace Avalonia.Wayland.Server;
 
@@ -27,7 +28,7 @@ partial class WaylandWorker
 
     private readonly System.Timers.Timer _renderLoopStarvationTimer = new System.Timers.Timer(s_RenderLoopStarvationInterval);
 
-    class RenderLoopImpl : IRenderLoop
+    internal class RenderLoopImpl : IRenderLoop
     {
         private readonly List<IRenderLoopTask> _tasks = new();
         private readonly List<IRenderLoopTask> _tasksCopy = new();
@@ -54,10 +55,10 @@ partial class WaylandWorker
             WakeupCallback?.Invoke();
         }
 
-        public void DoTick()
+        public bool DoTick()
         {
             if (Interlocked.CompareExchange(ref _inTick, 1, 0) != 0)
-                return;
+                return false;
             try
             {
                 lock (_tasks)
@@ -66,10 +67,12 @@ partial class WaylandWorker
                     _tasksCopy.AddRange(_tasks);
                 }
 
+                var needsNextTick = false;
                 for (int i = 0; i < _tasksCopy.Count; i++)
-                    _tasksCopy[i].Render();
+                    needsNextTick |= _tasksCopy[i].Render();
 
                 _tasksCopy.Clear();
+                return needsNextTick;
             }
             finally
             {
@@ -84,11 +87,8 @@ partial class WaylandWorker
     
     void InitRenderTimer()
     {
-        _renderLoop.WakeupCallback = () =>
-        {
-            WakeupRenderLoop();
-            _wakeupFd.Set();
-        };
+        _renderLoopWakeupSignaler = new ServerSignaler(this, WakeupRenderLoop);
+        _renderLoop.WakeupCallback = new ServerSignaler(this, RequestRenderLoopTick).Signal;
         
         Compositor.AfterCommit += delegate
         {
@@ -97,19 +97,38 @@ partial class WaylandWorker
                 _hasPendingServerJobs = false;
                 AnyThreadWakeupRenderLoop();
             }
-
-            lock (_renderLoopStarvationLock)
-            {
-                if (_renderLoopStarvedSince == null)
-                {
-                    _renderLoopStarvedSince = _clock.Elapsed;
-                    _renderLoopStarvationTimer.Enabled = true;
-                }
-            }
-            _wakeupFd.Set();
         };
-        _renderLoopWakeupSignaler = new ServerSignaler(this, WakeupRenderLoop);
         _renderLoopStarvationTimer.Elapsed += delegate { OnRenderLoopStarved(); };
+    }
+
+    private void RequestRenderLoopTick()
+    {
+        if (_renderLoopWakeupPending)
+            return;
+
+        if (!RequestFrameCallbacks())
+        {
+            WakeupRenderLoop();
+            return;
+        }
+
+        lock (_renderLoopStarvationLock)
+        {
+            if (_renderLoopStarvedSince == null)
+            {
+                _renderLoopStarvedSince = _clock.Elapsed;
+                _renderLoopStarvationTimer.Enabled = true;
+            }
+        }
+    }
+
+    private bool RequestFrameCallbacks()
+    {
+        var pending = false;
+        foreach (var persistent in _persistentObjects)
+            if (persistent is WSurface surface)
+                pending |= surface.EnsureFrameCallback();
+        return pending;
     }
 
     private void OnRenderLoopStarved()
@@ -135,7 +154,8 @@ partial class WaylandWorker
             _renderLoopWakeupPending = false;
             try
             {
-                _renderLoop.DoTick();
+                if (_renderLoop.DoTick())
+                    RequestFrameCallbacks();
             }
             catch (Exception ex)
             {

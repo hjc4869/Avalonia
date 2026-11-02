@@ -7,10 +7,12 @@ namespace Avalonia.Controls.Chrome;
 
 /// <summary>
 /// An invisible layer that provides resize grip hit-test zones at window edges.
-/// Grips only cover the frame/shadow area outside the client area.
+/// Grips cover the frame and the adjacent inner strip of the shadow outside the client area.
 /// </summary>
 internal class ResizeGripLayer : Control
 {
+    internal const double MaxShadowGripThickness = 4;
+
     private readonly Control _top = CreateGrip(WindowDecorationsElementRole.ResizeN, StandardCursorType.TopSide);
     private readonly Control _bottom = CreateGrip(WindowDecorationsElementRole.ResizeS, StandardCursorType.BottomSide);
     private readonly Control _left = CreateGrip(WindowDecorationsElementRole.ResizeW, StandardCursorType.LeftSide);
@@ -37,7 +39,7 @@ internal class ResizeGripLayer : Control
 
     /// <summary>
     /// The thickness of the resize grip area at each edge.
-    /// Grips are placed outside the client area (covering frame + shadow).
+    /// Grips are placed outside the client area, covering the frame and inner shadow strip.
     /// </summary>
     internal Thickness GripThickness
     {
