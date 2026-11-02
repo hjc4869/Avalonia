@@ -26,8 +26,8 @@ enum RawInputModifiers {
 * This is a hack to handle older Firefox (before v127 from June 2024) clipboard events in a more convenient way for framework users.
 * In the browser, events go in order KeyDown -> Paste -> KeyUp.
 * On KeyDown we trigger Avalonia handlers, which might execute readClipboard.
-* When readClipboard was executed, we mark ClipboardState as Pending and setup clipboard promise,
-* which will un-handle KeyDown event, basically allowing browser to pass a Paste event properly.
+* Keyboard paste gestures are allowed synchronously when the async clipboard APIs are unavailable.
+* When readClipboard is executed, we mark ClipboardState as Pending and set up the clipboard promise.
 * On actual Paste event we execute promise callbacks, resuming async operation, and returning pasted text to the app.
 * Note #1, on every KeyUp event we will reset all the state and reject pending promises if any, as this event it expected to come after Paste.
 * Note #2, whole this code will be executed only on older browsers where clipboard.read/readText is not available.
@@ -346,12 +346,22 @@ export class InputHelper {
 
     public static subscribeKeyEvents(element: HTMLInputElement, topLevelId: number) {
         const keyDownHandler = (args: KeyboardEvent) => {
-            JsExports.InputHelper.OnKeyDown(topLevelId, args.code, args.key, this.getModifiers(args))
-                .then((handled: boolean) => {
-                    if (!handled || this.clipboardState !== ClipboardState.Pending) {
-                        args.preventDefault();
-                    }
-                });
+            const navigator = element.ownerDocument.defaultView?.navigator;
+            const clipboard = navigator?.clipboard;
+            const isPaste = !args.altKey && (
+                ((args.ctrlKey || args.metaKey) && args.key.toLowerCase() === "v") ||
+                (args.shiftKey && args.key === "Insert"));
+            const needsPasteEvent = isPaste && !clipboard?.read && !clipboard?.readText;
+            const isComposing = args.isComposing || args.keyCode === 229 || args.key === "Process";
+            const isTextInput = !isComposing && !args.metaKey && (
+                args.getModifierState("AltGraph") ||
+                (!args.ctrlKey && (!args.altKey || navigator?.platform.startsWith("Mac") === true)));
+
+            if (!isComposing && args.key !== "Dead" && !needsPasteEvent) {
+                args.preventDefault();
+            }
+
+            JsExports.InputHelper.OnKeyDown(topLevelId, args.code, args.key, this.getModifiers(args), isTextInput);
         };
         element.addEventListener("keydown", keyDownHandler);
 

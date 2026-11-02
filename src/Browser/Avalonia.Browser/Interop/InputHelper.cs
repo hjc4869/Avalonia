@@ -26,8 +26,8 @@ internal static partial class InputHelper
     public static partial void SubscribeInputEvents(JSObject htmlElement, int topLevelId);
 
     [JSExport]
-    public static Task<bool> OnKeyDown(int topLevelId, string code, string key, int modifier) =>
-        RedirectInputRetunAsync(topLevelId, t => t.InputHandler.OnKeyDown(code, key, modifier), false);
+    public static Task<bool> OnKeyDown(int topLevelId, string code, string key, int modifier, bool isTextInput) =>
+        RedirectInputRetunAsync(topLevelId, t => t.InputHandler.OnKeyDown(code, key, modifier, isTextInput), false);
 
     [JSExport]
     public static Task<bool> OnKeyUp(int topLevelId, string code, string key, int modifier) =>
