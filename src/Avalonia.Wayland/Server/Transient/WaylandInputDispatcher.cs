@@ -8,6 +8,7 @@ using Avalonia.Wayland.Server.Interop;
 using Avalonia.Wayland.Server.Persistent;
 using NWayland;
 using NWayland.Protocols.CursorShapeV1;
+using NWayland.Protocols.PointerGesturesUnstableV1;
 using NWayland.Protocols.Wayland;
 
 namespace Avalonia.Wayland.Server.Transient;
@@ -19,6 +20,7 @@ partial class WaylandInputDispatcher : IDisposable
 
     private readonly WaylandGlobals _globals;
     private readonly Dictionary<uint, Seat> _seats = new();
+    private readonly Dictionary<uint, ZwpPointerGesturesV1> _pointerGestures = new();
 
     internal static WXdgShellSurface? FindSurfaceForWlSurface(WlSurface? surface) =>
         surface != null && surface.Tags.TryGetValue(typeof(WXdgShellSurface), out var tag)
@@ -111,12 +113,36 @@ partial class WaylandInputDispatcher : IDisposable
         if (_seats.Remove(globalName, out var seat))
             seat.Dispose();
     }
+
+    internal void OnPointerGesturesAdded(WlRegistry registry, uint globalName, uint version)
+    {
+        if (version < 1)
+            return;
+
+        _pointerGestures.Add(globalName, ZwpPointerGesturesV1.Bind(registry, globalName,
+            Math.Min(version, 2), null));
+        foreach (var seat in _seats.Values)
+            seat.EnsurePointerGestures();
+    }
+
+    internal void OnPointerGesturesRemoved(uint globalName)
+    {
+        if (_pointerGestures.Remove(globalName, out var manager))
+        {
+            if (manager.Version >= 2)
+                manager.Release();
+            else
+                manager.Dispose();
+        }
+    }
     
     public void Dispose()
     {
         foreach (var seat in _seats.Values)
             seat.Dispose();
         _seats.Clear();
+        foreach (var globalName in new List<uint>(_pointerGestures.Keys))
+            OnPointerGesturesRemoved(globalName);
         TextInputV3?.Dispose();
         TextInputV3 = null;
     }
@@ -214,6 +240,8 @@ partial class WaylandInputDispatcher : IDisposable
             deviceListener.SetWrapper(DataDevice);
         }
 
+        internal void EnsurePointerGestures() => _pointerHandler?.EnsureGestures();
+
         private void OnCapabilities(WlSeat.CapabilityEnum capabilities)
         {
             var hasPointer = capabilities.HasFlag(WlSeat.CapabilityEnum.Pointer);
@@ -290,6 +318,7 @@ partial class WaylandInputDispatcher : IDisposable
         private readonly Seat _seat;
         private readonly WlPointer _pointer;
         private readonly WpCursorShapeDeviceV1? _cursorShapeDevice;
+        private ZwpPointerGesturePinchV1? _pinchGesture;
 
         // Persistent pointer state (survives across frames)
         private WSurfaceEventSinkProxy? _focusedSink;
@@ -298,6 +327,7 @@ partial class WaylandInputDispatcher : IDisposable
         private Point _pointerPosition;
         private RawInputModifiers _modifiers;
         private uint _lastEnterSerial;
+        private int _fingerScrollAxes;
 
         // Per-frame: ordered event actions dispatched during Frame
         private readonly List<Action> _frameActions = new();
@@ -327,6 +357,8 @@ partial class WaylandInputDispatcher : IDisposable
         private bool _frameV120SeenX;
         private bool _frameV120SeenY;
         private WlPointer.AxisSourceEnum? _frameAxisSource;
+        private int _frameMovingAxes;
+        private int _frameStoppedAxes;
 
         public PointerHandler(WaylandInputDispatcher dispatcher, Seat seat)
         {
@@ -334,6 +366,19 @@ partial class WaylandInputDispatcher : IDisposable
             _seat = seat;
             _pointer = seat.WlSeat.GetPointer(new Listener(this));
             _cursorShapeDevice = dispatcher._globals.CursorShapeManager?.GetPointer(_pointer, null);
+            EnsureGestures();
+        }
+
+        internal void EnsureGestures()
+        {
+            if (_pinchGesture != null)
+                return;
+
+            foreach (var manager in _dispatcher._pointerGestures.Values)
+            {
+                _pinchGesture = manager.GetPinchGesture(_pointer, new PinchListener(this));
+                break;
+            }
         }
 
         // Shared, stateless fallback used when a surface hasn't requested a specific cursor.
@@ -404,12 +449,81 @@ partial class WaylandInputDispatcher : IDisposable
             _frameV120SeenX = false;
             _frameV120SeenY = false;
             _frameAxisSource = null;
+            _frameMovingAxes = 0;
+            _frameStoppedAxes = 0;
+        }
+
+        private void CancelFingerScroll(ulong timestamp)
+        {
+            if (_fingerScrollAxes == 0)
+                return;
+
+            _fingerScrollAxes = 0;
+            _focusedSink?.OnPointerAxis(timestamp, default, _modifiers | _seat.KeyboardModifiers,
+                _pointerPosition, true, TouchpadGesturePhase.Cancelled);
         }
 
         public void Dispose()
         {
+            CancelFingerScroll(0);
+            _pinchGesture?.Destroy();
             _cursorShapeDevice?.Dispose();
             _pointer.Release();
+        }
+
+        class PinchListener(PointerHandler handler) : ZwpPointerGesturePinchV1.Listener
+        {
+            private WSurfaceEventSinkProxy? _sink;
+            private Point _position;
+            private double _scale = 1;
+
+            protected override void Begin(ZwpPointerGesturePinchV1 eventSender, uint serial, uint time,
+                WlSurface? surface, uint fingers)
+            {
+                handler.CancelFingerScroll(time);
+                _sink = FindSurfaceForWlSurface(surface)?.EventSink;
+                _position = handler._pointerPosition;
+                _scale = 1;
+                var modifiers = handler._modifiers | handler._seat.KeyboardModifiers;
+                _sink?.OnPointerAxis(time, default, modifiers, _position, true, TouchpadGesturePhase.Began);
+                _sink?.OnPointerGesture(time, RawPointerEventType.Magnify, default, modifiers, _position);
+            }
+
+            protected override void Update(ZwpPointerGesturePinchV1 eventSender, uint time,
+                WlFixed dx, WlFixed dy, WlFixed scale, WlFixed rotation)
+            {
+                if (_sink == null)
+                    return;
+
+                var modifiers = handler._modifiers | handler._seat.KeyboardModifiers;
+                var currentScale = (double)scale;
+                if (currentScale > 0)
+                {
+                    var magnification = currentScale / _scale - 1;
+                    _scale = currentScale;
+                    if (magnification != 0)
+                        _sink.OnPointerGesture(time, RawPointerEventType.Magnify,
+                            new Vector(magnification, magnification), modifiers, _position);
+                }
+
+                var translation = new Vector((double)dx, (double)dy) / DipsPerWheelDelta;
+                if (translation != default)
+                    _sink.OnPointerAxis(time, translation, modifiers, _position, true, TouchpadGesturePhase.Changed);
+
+                var angle = (double)rotation;
+                if (angle != 0)
+                    _sink.OnPointerGesture(time, RawPointerEventType.Rotate,
+                        new Vector(angle, angle), modifiers, _position);
+            }
+
+            protected override void End(ZwpPointerGesturePinchV1 eventSender, uint serial, uint time,
+                int cancelled)
+            {
+                _sink?.OnPointerAxis(time, default, handler._modifiers | handler._seat.KeyboardModifiers,
+                    _position, true, cancelled != 0 ? TouchpadGesturePhase.Cancelled : TouchpadGesturePhase.Ended);
+                _sink = null;
+                _scale = 1;
+            }
         }
 
         class Listener(PointerHandler handler) : WlPointer.Listener
@@ -422,6 +536,7 @@ partial class WaylandInputDispatcher : IDisposable
                 handler._pointerPosition = pos;
                 handler._frameActions.Add(() =>
                 {
+                    handler.CancelFingerScroll(0);
                     handler._focusedSink = shellSurface?.EventSink;
                     handler._focusedSurface = shellSurface;
                     handler._focusedWlSurface = surface;
@@ -435,6 +550,7 @@ partial class WaylandInputDispatcher : IDisposable
             {
                 handler._frameActions.Add(() =>
                 {
+                    handler.CancelFingerScroll(0);
                     var leaveSink = handler._focusedSink;
                     handler._focusedSink = null;
                     handler._focusedSurface = null;
@@ -492,12 +608,33 @@ partial class WaylandInputDispatcher : IDisposable
                         handler._frameV120SeenX, handler._frameAxisSource, AxisUnitsPerDetent);
                     var deltaY = ConvertAxisDelta(handler._frameAxisRawY, handler._frameV120Y,
                         handler._frameV120SeenY, handler._frameAxisSource, AxisUnitsPerDetent);
+                    var finger = handler._frameAxisSource == WlPointer.AxisSourceEnum.Finger ||
+                        (handler._frameAxisSource == null && handler._fingerScrollAxes != 0);
+                    if (!finger)
+                        handler.CancelFingerScroll(handler._frameAxisTimestamp);
+
+                    var phase = TouchpadGesturePhase.None;
+                    if (finger && handler._frameMovingAxes != 0)
+                    {
+                        phase = handler._fingerScrollAxes == 0 ? TouchpadGesturePhase.Began : TouchpadGesturePhase.Changed;
+                        handler._fingerScrollAxes |= handler._frameMovingAxes;
+                    }
                     if (deltaX != 0 || deltaY != 0)
                     {
                         // Wayland: positive = scroll down/right. Avalonia: positive Y = scroll up.
                         var delta = new Vector(-deltaX, -deltaY);
                         handler._focusedSink?.OnPointerAxis(handler._frameAxisTimestamp, delta,
-                            handler._modifiers | handler._seat.KeyboardModifiers, handler._pointerPosition);
+                            handler._modifiers | handler._seat.KeyboardModifiers, handler._pointerPosition,
+                            finger, phase);
+                    }
+
+                    if (handler._fingerScrollAxes != 0 && handler._frameStoppedAxes != 0)
+                    {
+                        handler._fingerScrollAxes &= ~handler._frameStoppedAxes;
+                        if (handler._fingerScrollAxes == 0)
+                            handler._focusedSink?.OnPointerAxis(handler._frameAxisTimestamp, default,
+                                handler._modifiers | handler._seat.KeyboardModifiers, handler._pointerPosition,
+                                true, TouchpadGesturePhase.Ended);
                     }
                 });
             }
@@ -505,6 +642,7 @@ partial class WaylandInputDispatcher : IDisposable
             protected override void Axis(WlPointer eventSender, uint time, WlPointer.AxisEnum axis, WlFixed value)
             {
                 handler._frameAxisTimestamp = time;
+                handler._frameMovingAxes |= 1 << (int)axis;
 
                 if (axis == WlPointer.AxisEnum.VerticalScroll)
                     handler._frameAxisRawY += (double)value;
@@ -521,6 +659,9 @@ partial class WaylandInputDispatcher : IDisposable
 
             protected override void AxisStop(WlPointer eventSender, uint time, WlPointer.AxisEnum axis)
             {
+                handler._frameAxisTimestamp = time;
+                handler._frameStoppedAxes |= 1 << (int)axis;
+                EnqueueAxisDispatchIfNeeded();
             }
 
             protected override void AxisDiscrete(WlPointer eventSender, WlPointer.AxisEnum axis, int discrete)
