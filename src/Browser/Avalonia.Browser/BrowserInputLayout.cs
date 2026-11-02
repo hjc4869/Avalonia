@@ -103,6 +103,11 @@ internal static class BrowserInputLayout
         public double TimeStamp;
         public int TopLevelId;
         public DomKeyModifiers KeyModifiers;
+        /// <summary>
+        /// The legacy KeyboardEvent.keyCode, which is 229 for a key press that an IME processes.
+        /// </summary>
+        public int KeyCode;
+        public KeyRecordFlags Flags;
         public int KeyLength;
         public int CodeLength;
     }
@@ -131,6 +136,17 @@ internal static class BrowserInputLayout
         Alt = 1,
         Control = 2,
         Shift = 4,
-        Meta = 8
+        Meta = 8,
+        AltGraph = 16
+    }
+
+    [Flags]
+    public enum KeyRecordFlags
+    {
+        None = 0,
+        /// <summary>
+        /// KeyboardEvent.isComposing: the key press is part of an IME composition.
+        /// </summary>
+        IsComposing = 1
     }
 }

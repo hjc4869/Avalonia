@@ -35,6 +35,11 @@ internal class BrowserWindowingPlatform : IWindowingPlatform
 
     internal static readonly bool IsThreadingEnabled = DetectThreadSupport();
 
+    /// <summary>
+    /// Whether the browser runs on macOS, iOS or iPadOS, where Command is the shortcut modifier and Option types text.
+    /// </summary>
+    internal static bool IsApplePlatform { get; private set; }
+
     // Capture initial GlobalThis, so we can use it as a contextual bridge between threads.
     private static JSObject? s_globalThis;
     internal static JSObject GlobalThis
@@ -109,7 +114,8 @@ internal class BrowserWindowingPlatform : IWindowingPlatform
             .Bind<IPlatformIconLoader>().ToSingleton<IconLoaderStub>()
             .Bind<IActivatableLifetime>().ToSingleton<BrowserActivatableLifetime>();
 
-        if (AvaloniaModule.IsApplePlatform())
+        IsApplePlatform = AvaloniaModule.IsApplePlatform();
+        if (IsApplePlatform)
         {
             AvaloniaLocator.CurrentMutable
                 .Bind<PlatformHotkeyConfiguration>().ToConstant(PlatformHotkeyConfiguration.Apple)

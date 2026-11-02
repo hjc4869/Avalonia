@@ -223,7 +223,25 @@ internal static unsafe class BrowserInputQueue
 
         return topLevel.InputHandler.OnQueuedKeyEvent(
             record->Header.Type == RecordType.KeyDown ? RawKeyEventType.KeyDown : RawKeyEventType.KeyUp,
-            (ulong)record->TimeStamp, code, key, ToModifiers(record->KeyModifiers, 0, BrowserPointerType.Mouse));
+            (ulong)record->TimeStamp, code, key, ToModifiers(record->KeyModifiers, 0, BrowserPointerType.Mouse),
+            IsTextInputKey(record->KeyModifiers, record->KeyCode, (record->Flags & KeyRecordFlags.IsComposing) != 0,
+                BrowserWindowingPlatform.IsApplePlatform));
+    }
+
+    /// <summary>
+    /// Whether a key press types text rather than being a shortcut. Control and Command combinations are shortcuts,
+    /// except AltGr, which Windows reports as Control+Alt; Option types characters on Apple platforms.
+    /// Key presses that are part of an IME composition belong to the IME.
+    /// </summary>
+    internal static bool IsTextInputKey(DomKeyModifiers keys, int keyCode, bool isComposing, bool isApplePlatform)
+    {
+        if (isComposing || keyCode == 229 || (keys & DomKeyModifiers.Meta) != 0)
+            return false;
+
+        if ((keys & DomKeyModifiers.AltGraph) != 0)
+            return true;
+
+        return (keys & DomKeyModifiers.Control) == 0 && ((keys & DomKeyModifiers.Alt) == 0 || isApplePlatform);
     }
 
     private static RawPointerPoint ToRawPoint(PointRecord* p) => new()

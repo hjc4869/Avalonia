@@ -6,6 +6,7 @@ import {
     ControlBlock,
     DomKeyModifiers,
     KeyRecord,
+    KeyRecordFlags,
     PointerRecord,
     PointerType,
     PointRecord,
@@ -178,6 +179,8 @@ export class InputQueue {
         h.f64[(p + KeyRecord.TimeStamp) >>> 3] = args.timeStamp;
         h.i32[(p + KeyRecord.TopLevelId) >>> 2] = topLevelId;
         h.i32[(p + KeyRecord.KeyModifiers) >>> 2] = InputQueue.getKeyModifiers(args);
+        h.i32[(p + KeyRecord.KeyCode) >>> 2] = args.keyCode ?? 0;
+        h.i32[(p + KeyRecord.Flags) >>> 2] = args.isComposing ? KeyRecordFlags.IsComposing : KeyRecordFlags.None;
         h.i32[(p + KeyRecord.KeyLength) >>> 2] = key.length;
         h.i32[(p + KeyRecord.CodeLength) >>> 2] = code.length;
         let index = (p + KeyRecord.$size) >>> 1;
@@ -216,6 +219,7 @@ export class InputQueue {
         if (args.ctrlKey) { modifiers |= DomKeyModifiers.Control; }
         if (args.shiftKey) { modifiers |= DomKeyModifiers.Shift; }
         if (args.metaKey) { modifiers |= DomKeyModifiers.Meta; }
+        if (args.getModifierState?.("AltGraph")) { modifiers |= DomKeyModifiers.AltGraph; }
         return modifiers;
     }
 

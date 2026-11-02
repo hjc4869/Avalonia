@@ -89,7 +89,8 @@ internal class BrowserInputHandler
         return args;
     }
 
-    internal RawInputEventArgs? OnQueuedKeyEvent(RawKeyEventType type, ulong timestamp, string domCode, string domKey, RawInputModifiers modifiers)
+    internal RawInputEventArgs? OnQueuedKeyEvent(RawKeyEventType type, ulong timestamp, string domCode, string domKey,
+        RawInputModifiers modifiers, bool isTextInput)
     {
         if (_inputRoot is null)
             return null;
@@ -98,7 +99,7 @@ internal class BrowserInputHandler
         var key = KeyInterop.KeyFromDomKey(domKey, physicalKey);
         var keySymbol = KeyInterop.KeySymbolFromDomKey(domKey);
 
-        var args = new RawKeyEventArgs(
+        var args = new BrowserRawKeyEventArgs(
             BrowserWindowingPlatform.Keyboard,
             timestamp,
             _inputRoot,
@@ -106,7 +107,8 @@ internal class BrowserInputHandler
             key,
             modifiers,
             physicalKey,
-            keySymbol
+            keySymbol,
+            isTextInput
         );
 
         _rawEventGrouper.HandleEvent(args);
@@ -237,13 +239,32 @@ internal class BrowserInputHandler
 
         _topLevelImpl.Input?.Invoke(args);
 
-        // An unhandled key press with a printable symbol is delivered as text input as well.
+        // An unhandled key press with a printable symbol is delivered as text input as well, unless it is a
+        // shortcut: the letter of an unhandled Control or Command combination must not be typed.
         // The handled state of the text event is what the browser gets back for preventDefault().
-        if (args is RawKeyEventArgs { Type: RawKeyEventType.KeyDown, Handled: false, KeySymbol: { Length: 1 } symbol })
+        if (args is BrowserRawKeyEventArgs
+            {
+                Type: RawKeyEventType.KeyDown, Handled: false, IsTextInput: true, KeySymbol: { Length: 1 } symbol
+            })
         {
             var textArgs = new RawTextInputEventArgs(BrowserWindowingPlatform.Keyboard, args.Timestamp, _inputRoot, symbol);
             _topLevelImpl.Input?.Invoke(textArgs);
             args.Handled = textArgs.Handled;
         }
+    }
+
+    private sealed class BrowserRawKeyEventArgs(
+        IInputDevice device,
+        ulong timestamp,
+        IInputRoot root,
+        RawKeyEventType type,
+        Key key,
+        RawInputModifiers modifiers,
+        PhysicalKey physicalKey,
+        string? keySymbol,
+        bool isTextInput)
+        : RawKeyEventArgs(device, timestamp, root, type, key, modifiers, physicalKey, keySymbol)
+    {
+        public bool IsTextInput { get; } = isTextInput;
     }
 }
