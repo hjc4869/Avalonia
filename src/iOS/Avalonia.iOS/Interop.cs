@@ -11,7 +11,8 @@ internal unsafe class Interop
 {
     internal const string CoreFoundationLibrary = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
     internal const string libcLibrary = "/usr/lib/libc.dylib";
-    internal static NativeHandle kCFRunLoopDefaultMode = CFString.CreateNative("kCFRunLoopDefaultMode");
+    internal static NativeHandle kCFRunLoopCommonModes = CFString.CreateNative("kCFRunLoopCommonModes");
+    internal const uint QOS_CLASS_USER_INTERACTIVE = 0x21;
 
     [Flags]
     internal enum CFOptionFlags : ulong
@@ -23,6 +24,9 @@ internal unsafe class Interop
     
     [DllImport(libcLibrary)]
     internal static extern void dispatch_async_f(IntPtr queue, IntPtr context, delegate* unmanaged<IntPtr, void> dispatch);
+
+    [DllImport(libcLibrary)]
+    internal static extern int pthread_set_qos_class_self_np(uint qosClass, int relativePriority);
 
     [DllImport(CoreFoundationLibrary)]
     internal static extern IntPtr CFRunLoopGetMain();
