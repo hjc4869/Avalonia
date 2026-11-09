@@ -26,6 +26,12 @@ public interface IMetalPlatformSurfaceRenderTarget : IDisposable, IPlatformRende
 
     /// <summary>The actual negotiated color format of the render target.</summary>
     PlatformSurfaceColorFormat ColorFormat => default;
+
+    /// <summary>
+    /// Indicates that the session textures can take any drawing, i.e. they aren't framebuffer-only, so frames that
+    /// change almost completely can be drawn into them directly instead of being copied from an intermediate layer.
+    /// </summary>
+    bool CanDrawDirectly => false;
 }
 
 [PrivateApi]

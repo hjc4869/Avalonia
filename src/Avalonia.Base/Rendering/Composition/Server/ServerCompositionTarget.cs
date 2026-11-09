@@ -29,6 +29,7 @@ namespace Avalonia.Rendering.Composition.Server
         private PixelSize _layerSize;
         private IDrawingContextLayerImpl? _layer;
         private PlatformSurfaceColorVolume? _layerColorVolume;
+        private bool _layerIsOutdated;
         private bool _updateRequested;
         private bool _redrawRequested;
         private bool _fullRedrawRequested;
@@ -197,10 +198,22 @@ namespace Avalonia.Rendering.Composition.Server
                 return;
             }
 
-            var needLayer = _overlays.RequireLayer // Check if we don't need overlays
-                            // Check if render target can be rendered to directly and preserves the previous frame
-                            || !(_renderTarget.Properties.RetainsPreviousFrameContents
-                                 && _renderTarget.Properties.IsSuitableForDirectRendering);
+            var renderBounds = new LtrbRect(0, 0, PixelSize.Width, PixelSize.Height);
+            var targetProperties = _renderTarget.Properties;
+            bool needLayer, keepLayer;
+            if (_overlays.RequireLayer || !targetProperties.IsSuitableForDirectRendering)
+                needLayer = keepLayer = true;
+            // The render target preserves the previous frame, so dirty rects can be redrawn in place
+            else if (targetProperties.RetainsPreviousFrameContents)
+                needLayer = keepLayer = false;
+            // Rendering directly needs a full redraw, which beats updating most of the layer and copying all of it
+            else if (targetProperties.PrefersDirectFullRedraw)
+            {
+                needLayer = !ShouldRedrawDirectly(renderBounds);
+                keepLayer = true;
+            }
+            else
+                needLayer = keepLayer = true;
 
             IDrawingContextImpl renderTargetContext;
             RenderTargetDrawingContextProperties properties;
@@ -243,20 +256,23 @@ namespace Avalonia.Rendering.Composition.Server
                     _layerColorVolume = properties.PreferredColorVolume;
                     fullRedraw = true;
                 }
-                else if (!needLayer)
+                else if (!keepLayer)
                 {
                     _layer?.Dispose();
                     _layer = null;
                     _layerColorVolume = null;
                 }
 
-                if (_fullRedrawRequested || (!needLayer && !properties.PreviousFrameIsRetained))
+                if (_fullRedrawRequested || (!needLayer && !properties.PreviousFrameIsRetained)
+                                         || (needLayer && _layerIsOutdated))
                 {
                     _fullRedrawRequested = false;
                     fullRedraw = true;
                 }
 
-                var renderBounds = new LtrbRect(0, 0, PixelSize.Width, PixelSize.Height);
+                // A frame drawn directly into the render target isn't in the layer
+                _layerIsOutdated = !needLayer && _layer != null;
+
                 if (fullRedraw)
                 {
                     DirtyRects.Initialize(renderBounds);
@@ -266,7 +282,7 @@ namespace Avalonia.Rendering.Composition.Server
                 if (!DirtyRects.IsEmpty)
                 {
                     DirtyRects.FinalizeFrame(renderBounds);
-                    if (_layer != null)
+                    if (needLayer && _layer != null)
                     {
                         using (var context = _layer.CreateDrawingContext())
                             RenderRootToContextWithClip(context, Root);
@@ -296,6 +312,41 @@ namespace Avalonia.Rendering.Composition.Server
                 DirtyRects.Initialize(renderBounds);
             }
         }
+
+        /// <summary>
+        /// Decides whether a frame for a render target that doesn't keep its previous contents should be redrawn
+        /// directly into the target rather than through the intermediate layer.
+        /// </summary>
+        private bool ShouldRedrawDirectly(LtrbRect bounds)
+        {
+            var threshold = Compositor.Options.DirectFullRedrawThreshold ?? DefaultDirectFullRedrawThreshold;
+            if (threshold > 1)
+                return false;
+
+            // The whole frame is going to be redrawn anyway
+            if (_fullRedrawRequested || DirtyRects.IsEmpty)
+                return true;
+
+            var boundsArea = bounds.Width * bounds.Height;
+            if (boundsArea <= 0)
+                return true;
+
+            DirtyRects.FinalizeFrame(bounds);
+            double dirtyArea = 0;
+            if (DirtyRects is MultiDirtyRectTracker multi)
+            {
+                foreach (var rect in multi.InflatedRects)
+                    dirtyArea += Area(rect.IntersectOrEmpty(bounds));
+            }
+            else
+                dirtyArea = Area(DirtyRects.CombinedRect.IntersectOrEmpty(bounds));
+
+            return dirtyArea >= threshold * boundsArea;
+
+            static double Area(LtrbRect rect) => Math.Max(0, rect.Width) * Math.Max(0, rect.Height);
+        }
+
+        private const double DefaultDirectFullRedrawThreshold = 0.5;
 
         void RenderRootToContextWithClip(IDrawingContextImpl context, ServerCompositionVisual root)
         {

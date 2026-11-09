@@ -61,6 +61,15 @@ namespace Avalonia
         /// on Metal. Use <see cref="IPlatformHdrContentFeature"/> to declare visible HDR content.
         /// </summary>
         public iOSColorMode ColorMode { get; set; } = iOSColorMode.Standard;
+
+        /// <summary>
+        /// Gets or sets whether rendering waits for the touch input of the current display refresh while a touch
+        /// is moving, so that changes caused by the input are shown one refresh earlier. The render thread waits
+        /// at most half a refresh interval, less when frames take long to render, and only while touch events
+        /// keep arriving. Changes caused by touch input may also be sent to the render thread while the previous
+        /// batch of changes is still waiting to be rendered. The default value is true.
+        /// </summary>
+        public bool LowLatencyTouchInput { get; set; } = true;
     }
 
     public static class IOSApplicationExtensions
@@ -115,6 +124,7 @@ namespace Avalonia.iOS
             }
 
             Compositor = new Compositor(AvaloniaLocator.Current.GetService<IPlatformGraphics>());
+            Compositor.AfterCommit += Timer.OnCompositorCommitted;
             AvaloniaLocator.CurrentMutable.Bind<Compositor>().ToConstant(Compositor);
         }
 

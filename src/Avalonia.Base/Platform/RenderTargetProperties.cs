@@ -65,6 +65,15 @@ public struct RenderTargetProperties
     public bool IsSuitableForDirectRendering { get; init; }
 
     /// <summary>
+    /// Indicates that when most of a frame changes, redrawing the whole frame directly into the render target is
+    /// preferable to redrawing the changed part of an intermediate layer and then copying the entire layer into the
+    /// render target. Typical for GPU swapchains that don't retain the previous frame, where the copy reads and writes
+    /// every pixel of the surface once more. Only used when <see cref="IsSuitableForDirectRendering"/> is set and
+    /// <see cref="RetainsPreviousFrameContents"/> isn't.
+    /// </summary>
+    public bool PrefersDirectFullRedraw { get; init; }
+
+    /// <summary>
     /// The pixel encoding and color space the render target was actually created with.
     /// Defaults to the legacy non color managed 8 bit sRGB format.
     /// </summary>

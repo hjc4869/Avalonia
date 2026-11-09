@@ -1,9 +1,6 @@
 using System;
-using System.Diagnostics;
-using System.Security.Cryptography;
 using Avalonia.Media;
 using Avalonia.Platform;
-using Avalonia.Threading;
 
 namespace Avalonia.Input.GestureRecognizers
 {
@@ -12,6 +9,9 @@ namespace Avalonia.Input.GestureRecognizers
         // Pixels per second speed that is considered to be the stop of inertial scroll
         internal const double InertialScrollSpeedEnd = 5;
         public const double InertialResistance = 0.15;
+
+        // The longest time the first inertia frame may account for since the last rendered frame of the drag
+        private static readonly TimeSpan s_maxInertiaStartDelay = TimeSpan.FromSeconds(1.0 / 60);
 
         private bool _canHorizontallyScroll;
         private bool _canVerticallyScroll;
@@ -25,7 +25,6 @@ namespace Avalonia.Input.GestureRecognizers
         private bool _scrolling;
         private Point _trackedRootPoint;
         private IPointer? _tracking;
-        private Stopwatch? _stopWatch;
         private int _gestureId;
         private Point _pointerPressedPoint;
         private VelocityTracker? _velocityTracker;
@@ -257,8 +256,6 @@ namespace Avalonia.Input.GestureRecognizers
             _tracking = null;
             if (_scrolling)
             {
-                _stopWatch?.Stop();
-                _stopWatch = null;
                 _inertia = default;
                 _delta = default;
                 _scrolling = false;
@@ -287,9 +284,9 @@ namespace Avalonia.Input.GestureRecognizers
                 else
                 {
                     _tracking = null;
-                    _stopWatch = Stopwatch.StartNew();
-                    _lastTime = _stopWatch.Elapsed;
-                    _inertiaStartTime = _lastTime;
+                    // Inertia continues from the last frame the drag was rendered in. Animation frame times
+                    // are display times when the platform reports them, so time inertia on the same clock.
+                    _inertiaStartTime = _lastTime = MediaContext.Instance.LastAnimationFrameTime;
                     _currentInertiaGestureId = _gestureId;
                     Target!.RaiseEvent(new ScrollGestureInertiaStartingEventArgs(_gestureId, _inertia.Value));
                     MediaContext.Instance.RequestAnimationFrame(OnAnimationRequested);
@@ -297,53 +294,59 @@ namespace Avalonia.Input.GestureRecognizers
             }
         }
 
-        private void OnAnimationRequested(TimeSpan _)
+        private void OnAnimationRequested(TimeSpan frameTime)
         {
-            // Calculate the current speed and dispatch the next inertia event. This is done asynchronously so we have run the events
-            // with Input priority
-            Dispatcher.UIThread.InvokeAsync(() =>
+            // Another gesture has started, finish the current one
+            if (_gestureId != _currentInertiaGestureId || _inertia is not Vector inertia)
+                return;
+
+            // The step runs in the render pass that requested it rather than in a later dispatcher operation, so
+            // the new offset is laid out and committed with this frame instead of the next one.
+            if (frameTime <= _lastTime)
             {
-                // Another gesture has started, finish the current one
-                if (_gestureId != _currentInertiaGestureId || _stopWatch == null || _inertia is not Vector inertia)
-                {
-                    return;
-                }
-
-                var timeSpan = _stopWatch.Elapsed;
-                var elapsedSinceLastTick = timeSpan - _lastTime;
-                _lastTime = timeSpan;
-
-                var speed = inertia * Math.Pow(InertialResistance, (_lastTime - _inertiaStartTime).TotalSeconds);
-                var distance = speed * elapsedSinceLastTick.TotalSeconds;
-                var scrollGestureEventArgs = new ScrollGestureEventArgs(_gestureId, distance);
-                Target!.RaiseEvent(scrollGestureEventArgs);
-
-                if (!scrollGestureEventArgs.Handled || scrollGestureEventArgs.ShouldEndScrollGesture)
-                {
-                    EndGesture();
-                    return;
-                }
-
-                // EndGesture using InertialScrollSpeedEnd only in the direction of scrolling
-                if (CanVerticallyScroll && CanHorizontallyScroll && Math.Abs(speed.X) < InertialScrollSpeedEnd && Math.Abs(speed.Y) <= InertialScrollSpeedEnd)
-                {
-                    // NO-OP 
-                }
-                else if (CanVerticallyScroll && Math.Abs(speed.Y) <= InertialScrollSpeedEnd)
-                {
-                    EndGesture();
-                    return;
-                }
-                else if (CanHorizontallyScroll && Math.Abs(speed.X) < InertialScrollSpeedEnd)
-                {
-                    EndGesture();
-                    return;
-                }
-
-                // Reschedule on the next animation frame. TopLevel.RequestAnimationFrame isn't available on the Base project, so we use the global MediaContext
                 MediaContext.Instance.RequestAnimationFrame(OnAnimationRequested);
-            }, DispatcherPriority.Input);
+                return;
+            }
 
+            if (frameTime - _lastTime > s_maxInertiaStartDelay && _lastTime == _inertiaStartTime)
+                _inertiaStartTime = _lastTime = frameTime - s_maxInertiaStartDelay;
+
+            // Velocity decays as inertia * InertialResistance^t, so the distance travelled is its integral
+            // evaluated between the previous and the current frame times. Unlike speed * frame duration, the
+            // offset this produces depends only on the frame time and not on how long the previous frame took.
+            var previousDecay = Math.Pow(InertialResistance, (_lastTime - _inertiaStartTime).TotalSeconds);
+            var decay = Math.Pow(InertialResistance, (frameTime - _inertiaStartTime).TotalSeconds);
+            _lastTime = frameTime;
+
+            var speed = inertia * decay;
+            var distance = inertia * ((decay - previousDecay) / Math.Log(InertialResistance));
+            var scrollGestureEventArgs = new ScrollGestureEventArgs(_gestureId, distance);
+            Target!.RaiseEvent(scrollGestureEventArgs);
+
+            if (!scrollGestureEventArgs.Handled || scrollGestureEventArgs.ShouldEndScrollGesture)
+            {
+                EndGesture();
+                return;
+            }
+
+            // EndGesture using InertialScrollSpeedEnd only in the direction of scrolling
+            if (CanVerticallyScroll && CanHorizontallyScroll && Math.Abs(speed.X) < InertialScrollSpeedEnd && Math.Abs(speed.Y) <= InertialScrollSpeedEnd)
+            {
+                // NO-OP
+            }
+            else if (CanVerticallyScroll && Math.Abs(speed.Y) <= InertialScrollSpeedEnd)
+            {
+                EndGesture();
+                return;
+            }
+            else if (CanHorizontallyScroll && Math.Abs(speed.X) < InertialScrollSpeedEnd)
+            {
+                EndGesture();
+                return;
+            }
+
+            // Reschedule on the next animation frame. TopLevel.RequestAnimationFrame isn't available on the Base project, so we use the global MediaContext
+            MediaContext.Instance.RequestAnimationFrame(OnAnimationRequested);
         }
     }
 }

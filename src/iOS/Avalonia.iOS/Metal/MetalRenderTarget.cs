@@ -23,6 +23,9 @@ internal class MetalRenderTarget : IMetalPlatformSurfaceRenderTarget
 
     public PlatformSurfaceColorFormat ColorFormat => _surface.ColorFormat;
 
+    // The surface turns framebufferOnly off for its layer
+    public bool CanDrawDirectly => true;
+
     public void Dispose()
     {
     }

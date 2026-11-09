@@ -14,6 +14,17 @@ namespace Avalonia.Media;
 
 partial class MediaContext
 {
+    private bool _inputCommitRequested;
+    private bool _inputBatchOvertaking;
+
+    /// <summary>
+    /// Allows the next render pass to commit even if the previous composition batch hasn't been processed by the
+    /// render loop yet. Platforms call this after processing input, so changes caused by the input aren't held back
+    /// behind a batch committed earlier: the render loop applies all queued batches at once, which makes the input
+    /// visible one frame earlier. Only one batch may be committed ahead of throttling this way.
+    /// </summary>
+    internal void RequestInputCommit() => _inputCommitRequested = true;
+
     /// <summary>
     /// Actually sends the current batch to the compositor and does the required housekeeping
     /// This is the only place that should be allowed to call Commit
@@ -48,6 +59,7 @@ partial class MediaContext
         if (_pendingCompositionBatches.Count == 0)
         {
             _animationsAreWaitingForComposition = false;
+            _inputBatchOvertaking = false;
 
             // Check if we have requested commits or active animations and schedule a new render pass 
             if (_requestedCommits.Count != 0 || _clock.HasSubscriptions)
@@ -64,11 +76,27 @@ partial class MediaContext
     private bool CommitCompositorsWithThrottling()
     {
         Dispatcher.UIThread.VerifyAccess();
+        var inputCommitRequested = _inputCommitRequested;
+        _inputCommitRequested = false;
+
         // Check if we are still waiting for previous composition batches
         if (_pendingCompositionBatches.Count > 0)
         {
-            // Previous commit isn't handled yet
-            return true;
+            // Previous commit isn't handled yet. Changes caused by input may still go out once, the render loop
+            // will apply both batches in its next tick.
+            if (!inputCommitRequested || _inputBatchOvertaking)
+                return true;
+
+            // Compositors hold their commit requests back while their previous batch is in flight
+            foreach (var compositor in _pendingCompositionBatches.Keys)
+            {
+                if (compositor.HasRequestedCommit)
+                    _requestedCommits.Add(compositor);
+            }
+
+            if (_requestedCommits.Count == 0)
+                return true;
+            _inputBatchOvertaking = true;
         }
         
         if (_requestedCommits.Count == 0)

@@ -38,5 +38,12 @@ namespace Avalonia.Rendering
         /// Thread-safe: can be called from any thread.
         /// </summary>
         internal void Wakeup();
+
+        /// <summary>
+        /// Gets the display timing of the most recent tick, or null if the timer driving the loop
+        /// isn't synchronized with the display.
+        /// Thread-safe: can be called from any thread.
+        /// </summary>
+        internal RenderTimerFrameTiming? LastFrameTiming => null;
     }
 }

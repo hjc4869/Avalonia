@@ -22,4 +22,14 @@ namespace Avalonia.Skia
         /// </summary>
         PlatformSurfaceColorFormat ColorFormat => default;
     }
+
+    /// <summary>
+    /// Implemented by GPU render targets whose sessions may draw into the presented surface itself, with everything
+    /// Skia needs available, but which don't keep the previous frame, e.g. Metal drawables.
+    /// The compositor redraws such targets directly when most of a frame changes, skipping its intermediate layer.
+    /// </summary>
+    internal interface ISkiaGpuRenderTargetWithDirectRendering : ISkiaGpuRenderTarget
+    {
+        bool CanDrawDirectly { get; }
+    }
 }

@@ -31,4 +31,13 @@ public class CompositionOptions
     /// Required as a workaround for Skia bug https://issues.skia.org/issues/327877721
     /// </summary>
     public bool? UseSaveLayerRootClip { get; set; }
+
+    /// <summary>
+    /// For render targets that don't keep the previous frame but can be drawn to directly, such as Metal drawables,
+    /// the fraction of the frame that has to change for the frame to be redrawn directly into the render target,
+    /// instead of updating the changed part of an intermediate layer and copying the whole layer to the target.
+    /// A value greater than 1 always uses the intermediate layer. The default value is 0.5.
+    /// </summary>
+    [Unstable]
+    public double? DirectFullRedrawThreshold { get; set; }
 }

@@ -104,6 +104,9 @@ namespace Avalonia.Rendering
         internal IRenderTimer Timer => _timer;
 
         /// <inheritdoc />
+        public RenderTimerFrameTiming? LastFrameTiming => (_timer as IRenderTimerWithFrameTiming)?.LastFrameTiming;
+
+        /// <inheritdoc />
         public void Wakeup()
         {
             lock (_timerLock)

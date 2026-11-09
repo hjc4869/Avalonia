@@ -78,7 +78,7 @@ internal class SkiaMetalGpu : ISkiaGpu
         return false;
     }
 
-    public class SkiaMetalRenderTarget : ISkiaGpuRenderTarget
+    public class SkiaMetalRenderTarget : ISkiaGpuRenderTargetWithDirectRendering
     {
         private readonly SkiaMetalGpu _gpu;
         private IMetalPlatformSurfaceRenderTarget? _target;
@@ -132,6 +132,10 @@ internal class SkiaMetalGpu : ISkiaGpu
         }
 
         public PlatformRenderTargetState State => _target?.State ?? PlatformRenderTargetState.Disposed;
+
+        // Skia allocates stencil attachments for wrapped Metal render targets on demand, the platform has to say
+        // whether its textures can be drawn to beyond being a render pass attachment
+        public bool CanDrawDirectly => _target?.CanDrawDirectly ?? false;
         public PlatformSurfaceColorFormat ColorFormat => _target?.ColorFormat ?? default;
     }
     

@@ -38,6 +38,7 @@ namespace Avalonia.Rendering.Composition
         private readonly List<Action> _pendingServerCompositorJobs = new();
         private readonly List<Action> _pendingServerCompositorPostTargetJobs = new();
         private readonly Action _triggerCommitRequested;
+        private readonly Action _triggerDeferredCommitRequested;
 
         internal IEasing DefaultEasing { get; }
 
@@ -73,6 +74,12 @@ namespace Avalonia.Rendering.Composition
             _batchObjectPool = new(reclaimBuffersImmediately);
             _server = new ServerCompositor(loop, gpu, options, _batchObjectPool, _batchMemoryPool);
             _triggerCommitRequested = () => scheduler.CommitRequested(this);
+            // The deferred request is stale if the batch was committed in the meantime
+            _triggerDeferredCommitRequested = () =>
+            {
+                if (_nextCommit != null)
+                    scheduler.CommitRequested(this);
+            };
 
             DefaultEasing = new SplineEasing(new KeySpline(0.25, 0.1, 0.25, 1.0));
         }
@@ -97,7 +104,7 @@ namespace Avalonia.Rendering.Composition
                 var pending = _pendingBatch;
                 if (pending != null)
                     pending.Processed.ContinueWith(
-                        _ => Dispatcher.Post(_triggerCommitRequested, DispatcherPriority.Send),
+                        _ => Dispatcher.Post(_triggerDeferredCommitRequested, DispatcherPriority.Send),
                         CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 else
                     _triggerCommitRequested();
@@ -105,6 +112,12 @@ namespace Avalonia.Rendering.Composition
 
             return _nextCommit;
         }
+
+        /// <summary>
+        /// Indicates that changes were requested to be committed, but haven't been yet. While the previous batch
+        /// is in flight, the request isn't forwarded to the scheduler until that batch has been processed.
+        /// </summary>
+        internal bool HasRequestedCommit => _nextCommit != null;
 
         internal CompositionBatch Commit()
         {

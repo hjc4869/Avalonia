@@ -94,9 +94,9 @@ internal partial class MediaContext : ICompositorScheduler
             _inputMarkerOp = new DispatcherOperation(_dispatcher, DispatcherPriority.Input, _inputMarkerHandler,
                 throwOnUiThread: true, captureExecutionContext: false);
             _dispatcher.InvokeAsyncImpl(_inputMarkerOp, CancellationToken.None);
-            _inputMarkerAddedAt = _time.Elapsed;
+            _inputMarkerAddedAt = Now;
         }
-        else if (!now && (_time.Elapsed - _inputMarkerAddedAt).TotalSeconds > MaxSecondsWithoutInput)
+        else if (!now && (Now - _inputMarkerAddedAt).TotalSeconds > MaxSecondsWithoutInput)
         {
             priority = DispatcherPriority.Input;
         }
@@ -133,9 +133,8 @@ internal partial class MediaContext : ICompositorScheduler
     
     private void RenderCore()
     {
-        var now = _time.Elapsed;
         if (!_animationsAreWaitingForComposition)
-            _clock.Pulse(now);
+            _clock.Pulse(GetAnimationFrameTime());
 
         // Since new animations could be started during the layout and can affect layout/render
         // We are doing several iterations when it happens
@@ -152,12 +151,15 @@ internal partial class MediaContext : ICompositorScheduler
             break;
         }
         
-        if (_requestedCommits.Count > 0 || _clock.HasSubscriptions)
+        if (_requestedCommits.Count > 0 || _clock.HasSubscriptions || _inputCommitRequested)
         {
             _animationsAreWaitingForComposition = CommitCompositorsWithThrottling();
             if (!_animationsAreWaitingForComposition && _clock.HasSubscriptions) 
                 _animationsTimer.Start();
         }
+
+        // An input commit request only applies to the render pass that follows the input
+        _inputCommitRequested = false;
     }
 
     // Used for unit tests

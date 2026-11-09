@@ -51,6 +51,18 @@ namespace Avalonia.Skia
         }
         
         public PlatformRenderTargetState PlatformRenderTargetState => _renderTarget.State;
-        public RenderTargetProperties Properties => new() { ColorFormat = _renderTarget.ColorFormat };
+        public RenderTargetProperties Properties
+        {
+            get
+            {
+                var direct = _renderTarget is ISkiaGpuRenderTargetWithDirectRendering { CanDrawDirectly: true };
+                return new()
+                {
+                    ColorFormat = _renderTarget.ColorFormat,
+                    IsSuitableForDirectRendering = direct,
+                    PrefersDirectFullRedraw = direct
+                };
+            }
+        }
     }
 }

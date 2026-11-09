@@ -26,6 +26,8 @@ namespace Avalonia.Rendering.Composition.Server
         private readonly Queue<Action> _receivedJobQueue = new();
         private readonly Queue<Action> _receivedPostTargetJobQueue = new();
         public long LastBatchId { get; private set; }
+        // Timestamp the clock started at, give or take the time to start it
+        private readonly long _clockOrigin = Stopwatch.GetTimestamp();
         public Stopwatch Clock { get; } = Stopwatch.StartNew();
         public TimeSpan ServerNow { get; private set; }
         private readonly List<ServerCompositionTarget> _activeTargets = new();
@@ -70,7 +72,28 @@ namespace Avalonia.Rendering.Composition.Server
             _renderLoop.Wakeup();
         }
 
-        internal void UpdateServerTime() => ServerNow = Clock.Elapsed;
+        /// <summary>
+        /// Advances <see cref="ServerNow"/>. Ticks of a display-synchronized timer use the time their frame
+        /// is going to be shown, so animations advance by whole frame intervals instead of inheriting the
+        /// scheduling jitter of the timer callback. The value never goes backwards.
+        /// </summary>
+        private void UpdateServerTime(bool isRenderLoopTick)
+        {
+            var now = Clock.Elapsed;
+            if (isRenderLoopTick && _renderLoop.LastFrameTiming is { } frame)
+            {
+                // Converted from the clock origin, so that the same target always gives the same time
+                var target = Stopwatch.GetElapsedTime(_clockOrigin, frame.TargetTimestamp);
+                // Don't trust a target that is far from the current time, e.g. a stale value from a stopped timer
+                if (Math.Abs((target - now).Ticks) <= MaxFrameTargetDistance.Ticks)
+                    now = target;
+            }
+
+            if (now > ServerNow)
+                ServerNow = now;
+        }
+
+        private static readonly TimeSpan MaxFrameTargetDistance = TimeSpan.FromMilliseconds(250);
 
         readonly List<CompositionBatch> _reusableToNotifyProcessedList = new();
         readonly List<CompositionBatch> _reusableToNotifyRenderedList = new();
@@ -182,10 +205,10 @@ namespace Avalonia.Rendering.Composition.Server
             _reusableToNotifyRenderedList.Clear();
         }
 
-        bool IRenderLoopTask.Render() => ExecuteRender(true);
-        public void Render(bool catchExceptions) => ExecuteRender(catchExceptions);
+        bool IRenderLoopTask.Render() => ExecuteRender(true, true);
+        public void Render(bool catchExceptions) => ExecuteRender(catchExceptions, false);
         
-        private bool ExecuteRender(bool catchExceptions)
+        private bool ExecuteRender(bool catchExceptions, bool isRenderLoopTick)
         {
             if (Dispatcher.UIThread.CheckAccess())
             {
@@ -195,7 +218,7 @@ namespace Avalonia.Rendering.Composition.Server
                 try
                 {
                     using (Dispatcher.UIThread.DisableProcessing()) 
-                        return RenderReentrancySafe(catchExceptions);
+                        return RenderReentrancySafe(catchExceptions, isRenderLoopTick);
                 }
                 finally
                 {
@@ -203,10 +226,10 @@ namespace Avalonia.Rendering.Composition.Server
                 }
             }
             else
-                return RenderReentrancySafe(catchExceptions);
+                return RenderReentrancySafe(catchExceptions, isRenderLoopTick);
         }
         
-        private bool RenderReentrancySafe(bool catchExceptions)
+        private bool RenderReentrancySafe(bool catchExceptions, bool isRenderLoopTick)
         {
             lock (_lock)
             {
@@ -215,7 +238,7 @@ namespace Avalonia.Rendering.Composition.Server
                     try
                     {
                         _safeThread = Thread.CurrentThread;
-                        return RenderCore(catchExceptions);
+                        return RenderCore(catchExceptions, isRenderLoopTick);
                     }
                     finally
                     {
@@ -248,9 +271,9 @@ namespace Avalonia.Rendering.Composition.Server
             return Stopwatch.GetElapsedTime(compositorGlobalPassesStarted);
         }
         
-        private bool RenderCore(bool catchExceptions)
+        private bool RenderCore(bool catchExceptions, bool isRenderLoopTick)
         {
-            UpdateServerTime();
+            UpdateServerTime(isRenderLoopTick);
             
             var compositorGlobalPassesElapsed = ExecuteGlobalPasses();
             

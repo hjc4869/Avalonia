@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Avalonia.Collections.Pooled;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
+using Avalonia.Media;
 using Avalonia.Platform;
 using Foundation;
 using UIKit;
@@ -124,6 +125,13 @@ internal sealed class InputHandler
 #else
                 => false;
 #endif
+        }
+
+        if (Platform.Timer is { LowLatencyTouchInput: true } timer)
+        {
+            // Let the changes caused by these touches be committed and rendered in the current display refresh
+            MediaContext.Instance.RequestInputCommit();
+            timer.OnPointerInput(_knownTouches.Count > 0);
         }
     }
 
