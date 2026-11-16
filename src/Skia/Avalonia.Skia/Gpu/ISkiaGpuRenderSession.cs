@@ -36,5 +36,10 @@ namespace Avalonia.Skia
         /// or null when the platform can't report one.
         /// </summary>
         PlatformSurfaceColorVolume? PreferredColorVolume => null;
+
+        /// <summary>
+        /// The number of frames since the surface was last rendered to, or 0 when its contents are undefined.
+        /// </summary>
+        int BufferAge => 0;
     }
 }

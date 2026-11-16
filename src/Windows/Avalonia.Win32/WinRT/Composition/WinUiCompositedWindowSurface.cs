@@ -28,9 +28,13 @@ namespace Avalonia.Win32.WinRT.Composition
 
         public IDirect3D11TextureRenderTarget2 CreateRenderTarget(IPlatformGraphicsContext context, IntPtr d3dDevice)
         {
-            var cornerRadius = AvaloniaLocator.Current.GetService<Win32PlatformOptions>()
-                ?.WinUICompositionBackdropCornerRadius;
+            var options = AvaloniaLocator.Current.GetService<Win32PlatformOptions>();
+            var cornerRadius = options?.WinUICompositionBackdropCornerRadius;
             _window ??= new WinUiCompositedWindow(_info, _shared, cornerRadius);
+
+            if (options?.UseWinUICompositionSwapChain == true)
+                return new WinUiSwapChainWindowRenderTarget(context, _window, d3dDevice, _shared.Compositor,
+                    options.WinUICompositionSwapChainFrameLatency);
 
             return new WinUiCompositedWindowRenderTarget(context, _window, d3dDevice, _shared.Compositor);
         }

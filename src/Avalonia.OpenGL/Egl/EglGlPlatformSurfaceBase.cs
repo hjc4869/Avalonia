@@ -33,6 +33,8 @@ namespace Avalonia.OpenGL.Egl
 
         protected virtual bool SkipWaits => false;
 
+        public virtual bool RetainsFrameContents => false;
+
         public virtual PlatformSurfaceColorFormat ColorFormat => Context.Display.ColorFormat;
 
         /// <summary>
@@ -46,7 +48,16 @@ namespace Avalonia.OpenGL.Egl
 
         protected IGlPlatformSurfaceRenderingSession BeginDraw(EglSurface surface,
             PixelSize size, double scaling, Action? onFinish = null, bool isYFlipped = false,
-            Action? beforeSwap = null)
+            Action? beforeSwap = null) =>
+            BeginDraw(surface, size, scaling, onFinish, isYFlipped, beforeSwap, 0);
+
+        /// <summary>
+        /// Begins a session on a surface that last held the frame <paramref name="bufferAge"/> frames
+        /// back, or undefined contents when it is 0.
+        /// </summary>
+        protected IGlPlatformSurfaceRenderingSession BeginDraw(EglSurface surface,
+            PixelSize size, double scaling, Action? onFinish, bool isYFlipped,
+            Action? beforeSwap, int bufferAge)
         {
 
             var restoreContext = Context.MakeCurrent(surface);
@@ -79,7 +90,10 @@ namespace Avalonia.OpenGL.Egl
 
                 
                 success = true;
-                return new Session(Context.Display, Context, surface, size, scaling,  restoreContext, onFinish, isYFlipped, SkipWaits, beforeSwap, ColorFormat, PreferredColorVolume);
+                return new Session(Context.Display, Context, surface, size, scaling,  restoreContext, onFinish, isYFlipped, SkipWaits, beforeSwap, ColorFormat, PreferredColorVolume)
+                {
+                    BufferAge = bufferAge
+                };
             }
             finally
             {
@@ -142,6 +156,7 @@ namespace Avalonia.OpenGL.Egl
             public bool IsYFlipped { get; }
             public PlatformSurfaceColorFormat ColorFormat { get; }
             public PlatformSurfaceColorVolume? PreferredColorVolume { get; }
+            public int BufferAge { get; init; }
         }
 
         public virtual PlatformRenderTargetState State =>

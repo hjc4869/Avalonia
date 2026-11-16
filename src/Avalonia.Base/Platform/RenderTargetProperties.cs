@@ -81,6 +81,14 @@ public struct RenderTargetDrawingContextProperties
     public bool PreviousFrameIsRetained { get; init; }
 
     /// <summary>
+    /// The number of frames since the surface targeted by the drawing context was last rendered to
+    /// when <see cref="PreviousFrameIsRetained"/> is set: 1 when it holds the previous frame, 2 when
+    /// it holds the frame before that (a two buffer flip swap chain), and so on. Values below 1 are
+    /// treated as 1.
+    /// </summary>
+    public int BufferAge { get; init; }
+
+    /// <summary>
     /// The color volume snapshotted for this drawing session, or null when unavailable.
     /// Retained intermediate layers created for a different volume need to be recreated.
     /// </summary>

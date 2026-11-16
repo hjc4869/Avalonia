@@ -32,7 +32,9 @@ namespace Avalonia.Skia
 
             properties = new RenderTargetDrawingContextProperties
             {
-                PreferredColorVolume = session.PreferredColorVolume
+                PreferredColorVolume = session.PreferredColorVolume,
+                PreviousFrameIsRetained = session.BufferAge > 0,
+                BufferAge = session.BufferAge
             };
 
             var nfo = new DrawingContextImpl.CreateInfo
@@ -51,6 +53,13 @@ namespace Avalonia.Skia
         }
         
         public PlatformRenderTargetState PlatformRenderTargetState => _renderTarget.State;
-        public RenderTargetProperties Properties => new() { ColorFormat = _renderTarget.ColorFormat };
+        // Not suitable for direct rendering: Skia snapshots the wrapped platform framebuffer with CopyTexSubImage,
+        // which GLES leaves undefined for floating point default framebuffers, so drawing that samples the
+        // surface needs the retained layer.
+        public RenderTargetProperties Properties => new()
+        {
+            ColorFormat = _renderTarget.ColorFormat,
+            RetainsPreviousFrameContents = _renderTarget.RetainsFrameContents
+        };
     }
 }

@@ -14,5 +14,10 @@ namespace Avalonia.OpenGL.Surfaces
         /// The pixel encoding and color space every session created from this target will use.
         /// </summary>
         PlatformSurfaceColorFormat ColorFormat => default;
+
+        /// <summary>
+        /// Whether the surface keeps its contents between sessions.
+        /// </summary>
+        bool RetainsFrameContents => false;
     }
 }

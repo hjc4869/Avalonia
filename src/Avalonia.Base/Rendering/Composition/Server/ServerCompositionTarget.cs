@@ -29,6 +29,8 @@ namespace Avalonia.Rendering.Composition.Server
         private PixelSize _layerSize;
         private IDrawingContextLayerImpl? _layer;
         private PlatformSurfaceColorVolume? _layerColorVolume;
+        // Damage of the most recently presented frames, newest first, for directly rendered targets.
+        private readonly LtrbRect?[] _damageHistory = new LtrbRect?[3];
         private bool _updateRequested;
         private bool _redrawRequested;
         private bool _fullRedrawRequested;
@@ -266,6 +268,35 @@ namespace Avalonia.Rendering.Composition.Server
                 if (!DirtyRects.IsEmpty)
                 {
                     DirtyRects.FinalizeFrame(renderBounds);
+
+                    if (_layer == null)
+                    {
+                        // A surface that last held an older frame also misses the damage of the frames
+                        // presented since, so those areas are repainted together with this frame's.
+                        var ownDamage = DirtyRects.CombinedRect;
+                        var missedFrames = fullRedraw ? 0 : Math.Min(properties.BufferAge - 1, _damageHistory.Length);
+                        var extended = false;
+                        for (var i = 0; i < missedFrames; i++)
+                        {
+                            if (_damageHistory[i] is { } missed)
+                            {
+                                DirtyRects.AddRect(missed);
+                                extended = true;
+                            }
+                        }
+
+                        if (extended)
+                            DirtyRects.FinalizeFrame(renderBounds);
+
+                        for (var i = _damageHistory.Length - 1; i > 0; i--)
+                            _damageHistory[i] = _damageHistory[i - 1];
+                        _damageHistory[0] = ownDamage;
+                    }
+                    else
+                    {
+                        Array.Clear(_damageHistory);
+                    }
+
                     if (_layer != null)
                     {
                         using (var context = _layer.CreateDrawingContext())

@@ -25,6 +25,8 @@ namespace Avalonia.Skia
 
         public PlatformSurfaceColorFormat ColorFormat => _surface.ColorFormat;
 
+        public bool RetainsFrameContents => _surface.RetainsFrameContents;
+
         class GlGpuSession : ISkiaGpuRenderSession
         {
             private readonly GRBackendRenderTarget _backendRenderTarget;
@@ -59,6 +61,7 @@ namespace Avalonia.Skia
             public double ScaleFactor => _glSession.Scaling;
             public PlatformSurfaceColorFormat ColorFormat => _glSession.ColorFormat;
             public PlatformSurfaceColorVolume? PreferredColorVolume => _glSession.PreferredColorVolume;
+            public int BufferAge => _glSession.BufferAge;
         }
         
         public ISkiaGpuRenderSession BeginRenderingSession(IRenderTarget.RenderTargetSceneInfo sceneInfo)

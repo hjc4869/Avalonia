@@ -172,6 +172,25 @@ public class Win32PlatformOptions
     public float? WinUICompositionBackdropCornerRadius { get; set; }
 
     /// <summary>
+    /// When <see cref="CompositionMode"/> is set to <see cref="Win32CompositionMode.WinUIComposition"/>, presents
+    /// windows through a flip model swap chain hosted in the composition tree instead of a composition drawing surface.
+    /// Finished frames are queued for the display, so a frame that takes longer than the system compositor's
+    /// commit deadline is shown one refresh later instead of halving the frame rate. The render loop ticks on
+    /// the compositor clock.
+    /// The default value is false.
+    /// </summary>
+    public bool UseWinUICompositionSwapChain { get; set; }
+
+    /// <summary>
+    /// The number of frames a swap chain enabled by <see cref="UseWinUICompositionSwapChain"/> may queue ahead of the
+    /// display, from 1 to 16. With more than one, a frame that is not finished in time for the system compositor is
+    /// shown one refresh later while the following frames are already being produced, which keeps the frame rate
+    /// when frames take close to a refresh interval. Each queued frame adds one refresh interval of latency.
+    /// The default value is 2.
+    /// </summary>
+    public int WinUICompositionSwapChainFrameLatency { get; set; } = 2;
+
+    /// <summary>
     /// Render directly on the UI thread instead of using a dedicated render thread.
     /// Only applicable if <see cref="CompositionMode"/> is set to <see cref="Win32CompositionMode.RedirectionSurface"/>.
     /// This setting is only recommended for interop with systems that must render on the UI thread, such as WPF.

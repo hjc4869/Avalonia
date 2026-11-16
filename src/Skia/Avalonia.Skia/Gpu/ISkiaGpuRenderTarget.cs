@@ -21,5 +21,10 @@ namespace Avalonia.Skia
         /// The pixel encoding and color space sessions created from this target render into.
         /// </summary>
         PlatformSurfaceColorFormat ColorFormat => default;
+
+        /// <summary>
+        /// Whether the target keeps its contents between sessions.
+        /// </summary>
+        bool RetainsFrameContents => false;
     }
 }
