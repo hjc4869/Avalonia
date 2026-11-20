@@ -46,6 +46,50 @@ public ComSingleObject<IAvnNativeControlHostTopLevelAttachment, &IID_IAvnNativeC
 {
     NSView* _holder;
     NSView* _child;
+    // Number of the latest ShowInBounds or HideWithSize call. A call deferred to the main queue
+    // applies only while it is still the latest, so it cannot replace a later placement.
+    int _placement;
+
+    void ShowInBounds(int placement, float x, float y, float width, float height)
+    {
+        if(_child == nil || placement != _placement)
+            return;
+        if(AvnInsidePotentialDeadlock::IsInside())
+        {
+            auto slf = comself(this);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                slf->ShowInBounds(placement, x, y, width, height);
+            });
+            return;
+        }
+
+        NSRect childFrame = {0, 0, width, height};
+        NSRect holderFrame = {x, y, width, height};
+
+        [_child setFrame: childFrame];
+        [_holder setFrame: holderFrame];
+        [_holder setHidden: false];
+        if([_holder superview] != nil)
+            [[_holder superview] setNeedsDisplay:true];
+    }
+
+    void HideWithSize(int placement, float width, float height)
+    {
+        if(_child == nil || placement != _placement)
+            return;
+        if(AvnInsidePotentialDeadlock::IsInside())
+        {
+            auto slf = comself(this);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                slf->HideWithSize(placement, width, height);
+            });
+            return;
+        }
+
+        NSRect frame = {0, 0, width, height};
+        [_holder setHidden: true];
+        [_child setFrame: frame];
+    }
 public:
     FORWARD_IUNKNOWN();
     
@@ -53,6 +97,7 @@ public:
     {
         _holder = [NSView new];
         [_holder setWantsLayer:true];
+        _placement = 0;
     }
     
     virtual ~AvnNativeControlHostTopLevelAttachment()
@@ -111,43 +156,12 @@ public:
     
     virtual void ShowInBounds(float x, float y, float width, float height) override
     {
-        if(_child == nil)
-            return;
-        if(AvnInsidePotentialDeadlock::IsInside())
-        {
-            auto slf = comself(this);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                slf->ShowInBounds(x, y, width, height);
-            });
-            return;
-        }
-        
-        NSRect childFrame = {0, 0, width, height};
-        NSRect holderFrame = {x, y, width, height};
-        
-        [_child setFrame: childFrame];
-        [_holder setFrame: holderFrame];
-        [_holder setHidden: false];
-        if([_holder superview] != nil)
-            [[_holder superview] setNeedsDisplay:true];
+        ShowInBounds(++_placement, x, y, width, height);
     }
     
     virtual void HideWithSize(float width, float height) override
     {
-        if(_child == nil)
-            return;
-        if(AvnInsidePotentialDeadlock::IsInside())
-        {
-            auto slf = comself(this);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                slf->HideWithSize(width, height);
-            });
-            return;
-        }
-        
-        NSRect frame = {0, 0, width, height};
-        [_holder setHidden: true];
-        [_child setFrame: frame];
+        HideWithSize(++_placement, width, height);
     }
     
     virtual void ReleaseChild() override
