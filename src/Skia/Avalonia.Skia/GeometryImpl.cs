@@ -40,8 +40,9 @@ namespace Avalonia.Skia
         [return: NotNullIfNotNull(nameof(path))]
         protected static SKPath? CachePathBounds(SKPath? path)
         {
-            // Skia caches bounds lazily, even for read-only calls like Contains.
-            // Initialize them before sharing the path with the render thread.
+            // Skia caches bounds lazily, even for read-only calls like Contains, and SkiaSharp
+            // replaces the native path of an edited SKPath on its first read.
+            // Do both before sharing the path with the render thread.
             _ = path?.Bounds;
             return path;
         }

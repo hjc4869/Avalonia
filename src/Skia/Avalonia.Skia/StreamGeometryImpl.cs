@@ -116,6 +116,7 @@ namespace Avalonia.Skia
             public void Dispose()
             {
                 _geometryImpl._bounds = Stroke.TightBounds.ToAvaloniaRect();
+                CachePathBounds(_geometryImpl._fillPath);
                 _geometryImpl.InvalidateCaches();
             }
 
