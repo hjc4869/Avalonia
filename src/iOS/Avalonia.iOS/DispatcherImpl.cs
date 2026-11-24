@@ -34,12 +34,12 @@ internal class DispatcherImpl : IDispatcherImplWithExplicitBackgroundProcessing
             Interop.CFOptionFlags.kCFRunLoopAfterWaiting | Interop.CFOptionFlags.kCFRunLoopBeforeSources |
             Interop.CFOptionFlags.kCFRunLoopBeforeWaiting,
             1, 0, &ObserverCallback, IntPtr.Zero);
-        Interop.CFRunLoopAddObserver(_mainLoop, observer, Interop.kCFRunLoopDefaultMode);
+        Interop.CFRunLoopAddObserver(_mainLoop, observer, Interop.kCFRunLoopCommonModes);
 
         _timer = Interop.CFRunLoopTimerCreate(IntPtr.Zero,
             Interop.CFAbsoluteTimeGetCurrent() + DistantFutureInterval,
             DistantFutureInterval, 0, 0, &TimerCallback, IntPtr.Zero);
-        Interop.CFRunLoopAddTimer(_mainLoop, _timer, Interop.kCFRunLoopDefaultMode);
+        Interop.CFRunLoopAddTimer(_mainLoop, _timer, Interop.kCFRunLoopCommonModes);
     }
 
     public event Action? Signaled;

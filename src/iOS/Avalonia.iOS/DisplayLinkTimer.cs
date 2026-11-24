@@ -30,9 +30,14 @@ namespace Avalonia.iOS
             SetPreferredFrameRateRange(_link);
             TimerThread = new Thread(() =>
             {
+                Interop.pthread_set_qos_class_self_np(Interop.QOS_CLASS_USER_INTERACTIVE, 0);
                 _link.AddToRunLoop(NSRunLoop.Current, NSRunLoopMode.Common);
                 NSRunLoop.Current.Run();
-            });
+            })
+            {
+                Name = "Avalonia Render Thread",
+                IsBackground = true
+            };
             TimerThread.Start();
 
             UIApplication.Notifications.ObserveDidEnterBackground((_, _) => SetInBackground(true));

@@ -40,7 +40,7 @@ namespace Avalonia.iOS.Eagl
 
             public void Dispose()
             {
-                _ctx.GlInterface.Finish();
+                _ctx.GlInterface.Flush();
                 _fbo.Present();
                 _restoreContext.Dispose();
             }
