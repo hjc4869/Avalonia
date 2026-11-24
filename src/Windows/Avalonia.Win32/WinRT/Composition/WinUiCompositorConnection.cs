@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -199,11 +200,116 @@ internal class WinUiCompositorConnection : IRenderTimer, Win32.IWindowsSurfaceFa
         }
     }
 
+    [DllImport("dcomp", ExactSpelling = true)]
+    private static extern uint DCompositionWaitForCompositorClock(uint count, IntPtr handles, uint timeoutInMs);
+
+    /// <summary>
+    /// Releases commit operations once the system compositor reports them consumed.
+    /// </summary>
+    private class PendingCommits : CallbackBase, IAsyncActionCompletedHandler
+    {
+        private const int MaxPending = 8;
+        private readonly List<IAsyncAction> _pending = new();
+
+        public void Add(IAsyncAction commit)
+        {
+            lock (_pending)
+            {
+                // A commit may never complete after a device loss, so the oldest one is let go.
+                if (_pending.Count == MaxPending)
+                {
+                    _pending[0].Dispose();
+                    _pending.RemoveAt(0);
+                }
+
+                _pending.Add(commit);
+            }
+
+            commit.SetCompleted(this);
+        }
+
+        public void Invoke(IAsyncAction? asyncInfo, AsyncStatus asyncStatus)
+        {
+            if (asyncInfo is null)
+                return;
+
+            var completed = asyncInfo.GetNativeIntPtr();
+            lock (_pending)
+            {
+                for (var i = 0; i < _pending.Count; i++)
+                {
+                    if (_pending[i].GetNativeIntPtr() == completed)
+                    {
+                        _pending[i].Dispose();
+                        _pending.RemoveAt(i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Ticks on the compositor clock. Frames are presented through swap chains, which queue them for
+    // the display, so a tick does not wait for the previous commit to be consumed.
+    private void RunClockLoop(CancellationTokenSource cts)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var commits = new PendingCommits();
+        var hasCompositorClock = true;
+
+        while (!cts.IsCancellationRequested)
+        {
+            try
+            {
+                if (_stopped)
+                    _wakeEvent.WaitOne();
+
+                if (hasCompositorClock)
+                {
+                    try
+                    {
+                        DCompositionWaitForCompositorClock(0, IntPtr.Zero, 1000);
+                    }
+                    catch (EntryPointNotFoundException)
+                    {
+                        // The compositor clock is available from Windows 11.
+                        hasCompositorClock = false;
+                    }
+                }
+
+                if (!hasCompositorClock)
+                    UnmanagedMethods.DwmFlush();
+
+                // Commit completion callbacks are delivered through this thread's message queue.
+                while (UnmanagedMethods.PeekMessage(out var msg, IntPtr.Zero, 0, 0, 1))
+                    UnmanagedMethods.DispatchMessage(ref msg);
+
+                lock (_shared.SyncRoot)
+                {
+                    _tick?.Invoke(stopwatch.Elapsed);
+                    // Visual tree changes made while rendering reach DWM through a commit.
+                    commits.Add(_shared.Compositor5.RequestCommitAsync());
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.TryGet(LogEventLevel.Error, "WinUIComposition")
+                    ?.Log(this, "Render loop tick failed: {0}", e);
+            }
+        }
+    }
+
     private void RunLoop()
     {
         var cts = new CancellationTokenSource();
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             cts.Cancel();
+
+        if (AvaloniaLocator.Current.GetService<Win32PlatformOptions>()?.UseCompositionSwapChain == true)
+        {
+            RunClockLoop(cts);
+            return;
+        }
 
         var handler = new RunLoopHandler(this);
         handler.Start();

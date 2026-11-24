@@ -32,7 +32,8 @@ namespace Avalonia.Win32.WinRT.Composition
             _window ??= new WinUiCompositedWindow(_info, _shared, options?.WinUICompositionBackdropCornerRadius);
 
             if (options?.UseCompositionSwapChain ?? false)
-                return new CompositionSwapchainRenderTarget(context, d3dDevice, _window);
+                return new CompositionSwapchainRenderTarget(context, d3dDevice, _window,
+                    options.CompositionSwapChainFrameLatency);
 
             return new WinUiCompositedWindowRenderTarget(context, _window, d3dDevice, _shared.Compositor);
         }

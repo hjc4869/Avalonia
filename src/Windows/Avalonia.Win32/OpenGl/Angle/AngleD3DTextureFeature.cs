@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.InteropServices;
 using Avalonia.OpenGL;
 using Avalonia.OpenGL.Egl;
@@ -21,12 +22,45 @@ internal class AngleD3DTextureFeature  : IGlPlatformSurfaceRenderTargetFactory
         private readonly AngleWin32EglDisplay _angle;
         private readonly IDirect3D11TextureRenderTarget2 _target;
 
+        // A wrapper around a texture that keeps its identity, reused across frames.
+        private EglSurface? _retainedSurface;
+        private IntPtr _retainedTexture;
+        private PixelSize _retainedSize;
+
         public RenderTargetWrapper(EglContext context,
             AngleWin32EglDisplay angle,
             IDirect3D11TextureRenderTarget2 target) : base(context)
         {
             _angle = angle;
             _target = target;
+            if (_target.SupportsPartialPresentation)
+                _target.TextureInvalidating = ReleaseRetainedSurface;
+        }
+
+        // The output is drawn from the retained layer: Skia's framebuffer snapshots are undefined for the
+        // floating point formats used for HDR, and partial presentation only copies the layer's dirty rects.
+        protected override RenderTargetProperties Properties => new()
+        {
+            SupportsPartialPresentation = _target.SupportsPartialPresentation
+        };
+
+        private void ReleaseRetainedSurface()
+        {
+            if (_retainedSurface is null)
+                return;
+            try
+            {
+                using (Context.EnsureCurrent())
+                    _retainedSurface.Dispose();
+            }
+            catch (PlatformGraphicsContextLostException)
+            {
+                // Destroying the surface does not need the lost context to be current.
+                _retainedSurface.Dispose();
+            }
+
+            _retainedSurface = null;
+            _retainedTexture = IntPtr.Zero;
         }
 
         public override IGlPlatformSurfaceRenderingSession BeginDrawCore(IRenderTarget.RenderTargetSceneInfo sceneInfo)
@@ -36,6 +70,7 @@ internal class AngleD3DTextureFeature  : IGlPlatformSurfaceRenderTargetFactory
             var contextLock = Context.EnsureCurrent();
             IDirect3D11TextureRenderTargetRenderSession? session = null;
             EglSurface? surface = null;
+            var retained = false;
             try
             {
                 try
@@ -51,16 +86,36 @@ internal class AngleD3DTextureFeature  : IGlPlatformSurfaceRenderTargetFactory
                     throw;
                 }
 
-                surface = _angle.WrapDirect3D11Texture(session.D3D11Texture2D, session.Offset.X, session.Offset.Y,
-                    session.Size.Width, session.Size.Height);
+                if (_target.SupportsPartialPresentation)
+                {
+                    if (_retainedSurface is null || _retainedTexture != session.D3D11Texture2D
+                                                 || _retainedSize != session.Size)
+                    {
+                        _retainedSurface?.Dispose();
+                        _retainedSurface = null;
+                        _retainedSurface = _angle.WrapDirect3D11Texture(session.D3D11Texture2D, 0, 0,
+                            session.Size.Width, session.Size.Height);
+                        _retainedTexture = session.D3D11Texture2D;
+                        _retainedSize = session.Size;
+                    }
+
+                    surface = _retainedSurface;
+                    retained = true;
+                }
+                else
+                {
+                    surface = _angle.WrapDirect3D11Texture(session.D3D11Texture2D, session.Offset.X, session.Offset.Y,
+                        session.Size.Width, session.Size.Height);
+                }
+
                 var rv = BeginDraw(surface, session.Size, session.Scaling, () =>
                 {
                     using(contextLock)
                     using (session)
-                    using (surface)
+                    using (retained ? null : surface)
                     {
                     }
-                }, true);
+                }, true, null, session.PartialPresentation);
                 success = true;
                 return rv;
             }
@@ -70,7 +125,7 @@ internal class AngleD3DTextureFeature  : IGlPlatformSurfaceRenderTargetFactory
                 {
                     using(contextLock)
                     using (session)
-                    using (surface)
+                    using (retained ? null : surface)
                     {
                     }
                 }
@@ -79,6 +134,7 @@ internal class AngleD3DTextureFeature  : IGlPlatformSurfaceRenderTargetFactory
 
         public override void Dispose()
         {
+            ReleaseRetainedSurface();
             _target.Dispose();
             base.Dispose();
         }

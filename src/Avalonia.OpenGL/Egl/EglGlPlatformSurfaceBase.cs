@@ -70,7 +70,19 @@ namespace Avalonia.OpenGL.Egl
 
         protected IGlPlatformSurfaceRenderingSession BeginDraw(EglSurface surface,
             PixelSize size, double scaling, Action? onFinish = null, bool isYFlipped = false,
-            Action? beforeSwap = null)
+            Action? beforeSwap = null) =>
+            BeginDraw(surface, size, scaling, onFinish, isYFlipped, beforeSwap, null);
+
+        /// <summary>
+        /// Begins a session whose partial presentation is provided by the native surface wrapped by
+        /// <paramref name="surface"/> rather than by EGL buffer age. The feature is exposed through
+        /// <see cref="IGlPlatformSurfaceRenderingSessionWithPartialPresentation"/>; presenting stays with
+        /// <paramref name="onFinish"/>.
+        /// </summary>
+        [PrivateApi]
+        protected IGlPlatformSurfaceRenderingSession BeginDraw(EglSurface surface,
+            PixelSize size, double scaling, Action? onFinish, bool isYFlipped,
+            Action? beforeSwap, IPartialPresentationFeature? nativePartialPresentation)
         {
 
             var restoreContext = Context.MakeCurrent(surface);
@@ -103,7 +115,7 @@ namespace Avalonia.OpenGL.Egl
 
                 
                 EglPartialPresentation.Session? partial = null;
-                if (Properties.SupportsPartialPresentation)
+                if (nativePartialPresentation == null && Properties.SupportsPartialPresentation)
                 {
                     var display = Context.Display;
                     _partialPresentation ??= new EglPartialPresentation(egli, display.Handle,
@@ -120,13 +132,13 @@ namespace Avalonia.OpenGL.Egl
                 success = true;
                 return new Session(Context.Display, Context, surface, size, scaling, restoreContext,
                     onFinish, isYFlipped, SkipWaits, beforeSwap, partial, OnSwapBuffersFailed, ColorFormat,
-                    PreferredColorVolume);
+                    PreferredColorVolume, nativePartialPresentation);
             }
             finally
             {
                 if(!success)
                 {
-                    if (Properties.SupportsPartialPresentation)
+                    if (nativePartialPresentation == null && Properties.SupportsPartialPresentation)
                         _partialPresentation?.Invalidate();
                     restoreContext.Dispose();
                 }
@@ -143,6 +155,7 @@ namespace Avalonia.OpenGL.Egl
             private readonly Action? _beforeSwap;
             private readonly bool _skipWaits;
             private readonly EglPartialPresentation.Session? _partial;
+            private readonly IPartialPresentationFeature? _nativePartial;
             private readonly Action _onSwapFailed;
             private bool _disposed;
 
@@ -150,7 +163,8 @@ namespace Avalonia.OpenGL.Egl
                 EglSurface glSurface, PixelSize size, double scaling,
                 IDisposable restoreContext, Action? onFinish, bool isYFlipped, bool skipWaits,
                 Action? beforeSwap, EglPartialPresentation.Session? partial, Action onSwapFailed,
-                PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume)
+                PlatformSurfaceColorFormat colorFormat, PlatformSurfaceColorVolume? preferredColorVolume,
+                IPartialPresentationFeature? nativePartial)
             {
                 Size = size;
                 Scaling = scaling;
@@ -165,6 +179,7 @@ namespace Avalonia.OpenGL.Egl
                 _beforeSwap = beforeSwap;
                 _skipWaits = skipWaits;
                 _partial = partial;
+                _nativePartial = nativePartial;
                 _onSwapFailed = onSwapFailed;
             }
 
@@ -217,7 +232,7 @@ namespace Avalonia.OpenGL.Egl
                 }
             }
 
-            public IPartialPresentationFeature? PartialPresentation => _partial;
+            public IPartialPresentationFeature? PartialPresentation => (IPartialPresentationFeature?)_partial ?? _nativePartial;
             public IGlContext Context => _context;
             public PixelSize Size { get; }
             public double Scaling { get; }

@@ -656,8 +656,12 @@ namespace Avalonia.Skia
                     }
                 }
 
-                // Ganesh packs atlas text colors into 8-bit vertices, which clips scaled scRGB values.
+                // Ganesh packs atlas text colors into 8-bit vertices, which clips scRGB values above 1.
+                // A solid color only leaves that range when diffuse white is scaled up; other brushes
+                // become shaders, which are evaluated per pixel and are not affected.
                 if (OperatingSystem.IsWindows() && _colorFormat.ColorSpace == PlatformColorSpace.ScRgbLinear &&
+                    foreground is ISolidColorBrush &&
+                    SkiaColorFormat.GetReferenceWhiteScale(_colorFormat, _preferredColorVolume) > 1.000001 &&
                     glyphRunImpl.GetTextPath() is { } textPath)
                 {
                     // The cached path includes the baseline origin, keeping brush coordinates unchanged.

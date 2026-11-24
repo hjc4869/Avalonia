@@ -171,9 +171,22 @@ public class Win32PlatformOptions
     /// This allows DWM to use optimized presentation modes (independent flip) for fullscreen windows
     /// and reduces latency, at the cost of every window owning two full-size buffers and, on the
     /// WinUI composition path, looser visual synchronization during interactive resize.
+    /// Finished frames are queued for the display (see <see cref="CompositionSwapChainFrameLatency"/>), so a frame
+    /// that takes longer than the system compositor's deadline is shown one refresh later instead of halving the
+    /// frame rate, and only the parts of the window that changed are redrawn. With
+    /// <see cref="Win32CompositionMode.WinUIComposition"/>, the render loop ticks on the compositor clock.
     /// The default value is null, which lets the framework decide (currently: disabled).
     /// </summary>
     public bool? UseCompositionSwapChain { get; set; }
+
+    /// <summary>
+    /// The number of frames a swapchain enabled by <see cref="UseCompositionSwapChain"/> may queue ahead of the
+    /// display, from 1 to 16. With more than one, a frame that is not finished in time for the system compositor is
+    /// shown one refresh later while the following frames are already being produced, which keeps the frame rate
+    /// when frames take close to a refresh interval. Each queued frame adds one refresh interval of latency.
+    /// The default value is 2.
+    /// </summary>
+    public int CompositionSwapChainFrameLatency { get; set; } = 2;
 
     /// <summary>
     /// When <see cref="CompositionMode"/> is set to <see cref="Win32CompositionMode.WinUIComposition"/>, create rounded corner blur brushes

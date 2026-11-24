@@ -40,6 +40,19 @@ public interface IDirect3D11TextureRenderTarget2 : IPlatformRenderSurfaceRenderT
     /// this value when they begin.
     /// </summary>
     PlatformSurfaceColorVolume? PreferredColorVolume => null;
+
+    /// <summary>
+    /// Whether sessions expose <see cref="IDirect3D11TextureRenderTargetRenderSession.PartialPresentation"/>.
+    /// The textures handed out by such a target keep their contents between sessions and keep their identity,
+    /// so a wrapper around them can be reused until <see cref="TextureInvalidating"/> is invoked.
+    /// </summary>
+    bool SupportsPartialPresentation => false;
+
+    /// <summary>
+    /// Invoked before the target releases or resizes its textures; holders of references to a
+    /// texture obtained from a session must drop them.
+    /// </summary>
+    Action? TextureInvalidating { get => null; set { } }
 }
 
 public interface IDirect3D11TextureRenderTargetRenderSession : IDisposable
@@ -48,4 +61,12 @@ public interface IDirect3D11TextureRenderTargetRenderSession : IDisposable
     public PixelSize Size { get; }
     public PixelPoint Offset { get; }
     public double Scaling { get; }
+
+    /// <summary>
+    /// Tracks the contents of the texture when the target supports partial presentation, otherwise null.
+    /// Without a call to <see cref="IPartialPresentationFeature.Succeeded"/>, disposing the session
+    /// does not present the texture.
+    /// </summary>
+    [PrivateApi]
+    IPartialPresentationFeature? PartialPresentation => null;
 }
